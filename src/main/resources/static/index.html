@@ -1,0 +1,1105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Voicemail Loopback</title>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" />
+  <style>
+    body { background: #f0f2f5; font-size: .92rem; }
+
+    /* ── Navbar ── */
+    .navbar-brand { font-weight: 700; letter-spacing: .4px; }
+    .navbar { box-shadow: 0 1px 4px rgba(0,0,0,.18); }
+
+    /* ── Filter bar ── */
+    #filterBar { background: #fff; border-bottom: 1px solid #dee2e6; padding: .65rem 1rem; }
+
+    /* Period buttons */
+    .btn-period { min-width: 62px; font-size: .82rem; }
+    .btn-period.active { background: #0d6efd; color: #fff; border-color: #0d6efd; }
+
+    /* View toggle */
+    .btn-view { font-size: .82rem; }
+    .btn-view.active { background: #198754; color: #fff; border-color: #198754; }
+
+    /* Date inputs */
+    input[type="date"] { font-size: .82rem; padding: .28rem .55rem; border: 1px solid #ced4da;
+                         border-radius: .375rem; color: #212529; }
+    input[type="date"]:focus { outline: none; border-color: #86b7fe;
+                               box-shadow: 0 0 0 .2rem rgba(13,110,253,.25); }
+
+    /* SLA inputs */
+    #slaHoursInput, #slaMinutesInput {
+                width: 54px; font-size: .82rem; padding: .28rem .45rem;
+                border: 1px solid #ced4da; border-radius: .375rem; color: #212529;
+                text-align: center; }
+    #slaHoursInput:focus, #slaMinutesInput:focus {
+                outline: none; border-color: #86b7fe;
+                box-shadow: 0 0 0 .2rem rgba(13,110,253,.25); }
+
+    /* ── Summary bar ── */
+    #summaryBar { background: #fff; border-bottom: 1px solid #dee2e6;
+                  padding: .4rem 1rem; font-size: .84rem; }
+
+    /* ── Table ── */
+    #vmTable th { font-size: .78rem; text-transform: uppercase; letter-spacing: .05em;
+                  color: #6c757d; white-space: nowrap; cursor: pointer; user-select: none; }
+    #vmTable th:hover { color: #0d6efd; }
+    #vmTable th .sort-icon { margin-left: 4px; font-size: .7rem; opacity: .5; }
+    #vmTable th.sorted .sort-icon { opacity: 1; color: #0d6efd; }
+    #vmTable td { vertical-align: middle; }
+
+    .badge-unread { background: #dc3545; }
+    .badge-read   { background: #198754; }
+
+    /* ── Loading overlay ── */
+    #loadingOverlay { position: fixed; inset: 0; background: rgba(255,255,255,.65);
+                      display: flex; align-items: center; justify-content: center; z-index: 9999; }
+
+    /* ── Login ── */
+    #loginScreen { min-height: 82vh; display: flex; align-items: center; justify-content: center; }
+    .login-card  { max-width: 420px; width: 100%; }
+
+    .hidden { display: none !important; }
+    .separator { width: 1px; background: #dee2e6; align-self: stretch; margin: 0 4px; }
+
+    /* ── Transcript cell ── */
+    .transcript-cell { max-width: 260px; overflow: hidden; text-overflow: ellipsis;
+                       white-space: nowrap; font-size: .80rem; color: #6c757d; cursor: help; }
+
+    /* ── Multi-select filter dropdown ── */
+    #filterMenu .form-check { padding: .3rem .6rem .3rem 1.75em; border-radius: .25rem; cursor: pointer; white-space: nowrap; }
+    #filterMenu .form-check:hover { background: #f0f2f5; }
+    #filterMenu .form-check-input { cursor: pointer; }
+    #filterMenu .form-check-label { cursor: pointer; font-size: .84rem; user-select: none; }
+    #filterMenu .filter-divider { border-top: 1px solid #dee2e6; margin: .3rem 0; }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════
+     NAVBAR
+══════════════════════════════════════════════ -->
+<nav class="navbar navbar-dark bg-primary px-3">
+  <span class="navbar-brand d-flex align-items-center gap-2">
+    <img src="logo.png" alt="Voicemail Loopback" height="36" style="border-radius:6px;" />
+    <span class="badge bg-secondary" style="font-size:.65rem;font-weight:500;">v1.0</span>
+  </span>
+  <div id="navRight" class="hidden d-flex align-items-center gap-3">
+    <span class="text-white-50 small" id="navUser"></span>
+    <span id="autoRefreshBadge" class="badge bg-success hidden">
+      <i class="bi bi-arrow-repeat"></i> Live
+    </span>
+    <span id="callbackLoadingBadge" class="badge bg-warning text-dark hidden" title="Fetching callback data in background…">
+      <i class="bi bi-hourglass-split"></i> Loading callbacks…
+    </span>
+    <button class="btn btn-sm btn-outline-light" id="btnToggleRefresh">
+      <i class="bi bi-arrow-repeat"></i> Auto-refresh
+    </button>
+    <button class="btn btn-sm btn-outline-light" onclick="location='/oauth/logout'">
+      <i class="bi bi-box-arrow-right"></i> Logout
+    </button>
+  </div>
+</nav>
+
+<!-- ══════════════════════════════════════════════
+     LOGIN
+══════════════════════════════════════════════ -->
+<div id="loginScreen">
+  <div class="card shadow login-card text-center p-4">
+    <div class="mb-3"><i class="bi bi-voicemail display-4 text-primary"></i></div>
+    <h4 class="mb-1">Voicemail Loopback</h4>
+    <p class="text-muted small mb-4">
+      Sign in with your RingCentral account to view voicemail activity across users and call queues.
+    </p>
+    <div id="loginError" class="alert alert-danger small hidden"></div>
+    <a href="/oauth/login" class="btn btn-primary btn-lg w-100">
+      <i class="bi bi-box-arrow-in-right me-2"></i>Login with RingCentral
+    </a>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     DASHBOARD
+══════════════════════════════════════════════ -->
+<div id="dashboard" class="hidden">
+
+  <!-- ── Filter bar ── -->
+  <div id="filterBar">
+
+    <!-- Row 1: Period quick filters + Custom date range -->
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+      <span class="fw-semibold text-nowrap small">Period</span>
+      <div class="btn-group btn-group-sm" id="periodGroup">
+        <button class="btn btn-outline-secondary btn-period" data-period="today">Today</button>
+        <button class="btn btn-outline-secondary btn-period active" data-period="7d">7 Days</button>
+        <button class="btn btn-outline-secondary btn-period" data-period="30d">30 Days</button>
+        <button class="btn btn-outline-secondary btn-period" data-period="60d">60 Days</button>
+        <button class="btn btn-outline-secondary btn-period" data-period="90d">90 Days</button>
+        <button class="btn btn-outline-secondary btn-period" data-period="180d">180 Days</button>
+        <button class="btn btn-outline-secondary btn-period" data-period="ytd">Year to Date</button>
+        <button class="btn btn-outline-secondary btn-period" data-period="all">All</button>
+      </div>
+
+      <div class="separator d-none d-md-block"></div>
+
+      <!-- Custom date range -->
+      <div class="d-flex align-items-center gap-1">
+        <span class="fw-semibold small text-nowrap">Custom</span>
+        <input type="date" id="dateFrom" title="From date" />
+        <span class="text-muted small">–</span>
+        <input type="date" id="dateTo"   title="To date" />
+        <button class="btn btn-sm btn-outline-secondary hidden" id="btnClearDates" title="Clear custom dates">
+          <i class="bi bi-x"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Row 2: View | Filter dropdown | Status | SLA | Refresh | Export CSV -->
+    <div class="d-flex flex-wrap align-items-center gap-2">
+
+      <!-- View toggle -->
+      <span class="fw-semibold text-nowrap small">View</span>
+
+      <!-- Users toggle — sits right next to User Extensions -->
+      <div class="form-check form-switch mb-0 d-flex align-items-center gap-1" title="Show or hide the User Extensions view">
+        <input class="form-check-input" type="checkbox" id="usersToggle" style="cursor:pointer;">
+        <label class="form-check-label text-nowrap small" for="usersToggle">Users</label>
+      </div>
+
+      <div class="btn-group btn-group-sm" id="viewGroup">
+        <button class="btn btn-outline-secondary btn-view hidden" data-view="user" id="btnViewUsers">
+          <i class="bi bi-person"></i> User Extensions
+        </button>
+        <button class="btn btn-outline-secondary btn-view active" data-view="queues">
+          <i class="bi bi-people"></i> Queues
+        </button>
+      </div>
+
+      <!-- Multi-select filter dropdown — contents change based on active view -->
+      <div class="dropdown" id="filterDropdown">
+        <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+                id="filterDropBtn" data-bs-toggle="dropdown" data-bs-auto-close="outside"
+                style="min-width:190px; text-align:left;">
+          All Queues
+        </button>
+        <div class="dropdown-menu p-2" id="filterMenu"
+             style="min-width:240px; max-height:320px; overflow-y:auto;">
+        </div>
+      </div>
+
+      <!-- Status -->
+      <div class="d-flex align-items-center gap-1">
+        <span class="fw-semibold text-nowrap small">Status</span>
+        <select id="statusFilter" class="form-select form-select-sm" style="width:130px">
+          <option value="all">All</option>
+          <option value="Unread">Unread only</option>
+          <option value="Read">Read only</option>
+        </select>
+      </div>
+
+      <!-- SLA toggle + threshold -->
+      <div class="d-flex align-items-center gap-2">
+        <div class="form-check form-switch mb-0 d-flex align-items-center gap-1">
+          <input class="form-check-input" type="checkbox" id="slaToggle" checked style="cursor:pointer;">
+          <label class="form-check-label fw-semibold text-nowrap small" for="slaToggle">SLA</label>
+        </div>
+        <div id="slaInputs" class="d-flex align-items-center gap-1">
+          <input type="number" id="slaHoursInput" min="0" max="999" value="4" title="Callback SLA hours" />
+          <span class="text-muted small text-nowrap">hrs</span>
+          <input type="number" id="slaMinutesInput" min="0" max="59" value="0" title="Callback SLA minutes" />
+          <span class="text-muted small text-nowrap">min</span>
+        </div>
+      </div>
+
+      <!-- Column visibility toggles -->
+      <div class="separator d-none d-md-block"></div>
+      <span class="fw-semibold text-nowrap small">Columns</span>
+
+      <div class="form-check form-switch mb-0 d-flex align-items-center gap-1"
+           title="Show a column with the caller name stated in the voicemail (extracted from transcript)">
+        <input class="form-check-input" type="checkbox" id="statedNameToggle" style="cursor:pointer;">
+        <label class="form-check-label text-nowrap small d-flex align-items-center gap-1" for="statedNameToggle">
+          <i class="bi bi-mic-fill"></i> Stated Name
+          <span id="statedNameSpinner" class="spinner-border spinner-border-sm hidden" role="status" aria-hidden="true"></span>
+        </label>
+      </div>
+
+      <div class="form-check form-switch mb-0 d-flex align-items-center gap-1"
+           title="Show a column with the full voicemail-to-text transcript">
+        <input class="form-check-input" type="checkbox" id="transcriptToggle" style="cursor:pointer;">
+        <label class="form-check-label text-nowrap small d-flex align-items-center gap-1" for="transcriptToggle">
+          <i class="bi bi-chat-text"></i> Transcript
+          <span id="transcriptSpinner" class="spinner-border spinner-border-sm hidden" role="status" aria-hidden="true"></span>
+        </label>
+      </div>
+
+      <button class="btn btn-sm btn-outline-primary ms-auto" id="btnRefresh">
+        <i class="bi bi-arrow-clockwise"></i> Refresh
+      </button>
+      <button class="btn btn-sm btn-outline-success" id="btnExportCsv" title="Export current view to CSV">
+        <i class="bi bi-download"></i> Export CSV
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Summary bar ── -->
+  <div id="summaryBar" class="d-flex gap-4 text-muted">
+    <span><strong id="totalCount">0</strong> voicemails</span>
+    <span><strong id="unreadCount"  class="text-danger">0</strong> unread</span>
+    <span><strong id="readCount"    class="text-success">0</strong> read</span>
+    <span><strong id="overdueCount" class="text-danger">0</strong> overdue</span>
+    <span><strong id="pendingCount" class="text-secondary">0</strong> pending callback</span>
+    <span class="ms-auto" id="lastRefreshed"></span>
+  </div>
+
+  <!-- ── Table ── -->
+  <div class="p-3">
+    <div class="card shadow-sm">
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-hover mb-0" id="vmTable">
+            <thead class="table-light">
+              <tr>
+                <th data-col="readStatus">Status <span class="sort-icon bi bi-arrow-down-up"></span></th>
+                <th data-col="callerName">Caller Name <span class="sort-icon bi bi-arrow-down-up"></span></th>
+                <th data-col="callerNumber">Caller Number <span class="sort-icon bi bi-arrow-down-up"></span></th>
+                <th data-col="extensionName" id="colQueue">Extension / Queue <span class="sort-icon bi bi-arrow-down-up"></span></th>
+                <th data-col="extensionType">Type <span class="sort-icon bi bi-arrow-down-up"></span></th>
+                <th data-col="dateTime" class="sorted">Date &amp; Time <span class="sort-icon bi bi-arrow-down"></span></th>
+                <th data-col="duration">Duration <span class="sort-icon bi bi-arrow-down-up"></span></th>
+                <th data-col="statedCallerName" id="colStatedNameHeader" class="hidden"><i class="bi bi-mic-fill"></i> Stated Name <span class="sort-icon bi bi-arrow-down-up"></span></th>
+                <th id="colTranscriptHeader" class="hidden"><i class="bi bi-chat-text"></i> Transcript</th>
+                <th data-col="callbackBy">Called Back By <span class="sort-icon bi bi-arrow-down-up"></span></th>
+                <th data-col="callbackTime">Callback Time <span class="sort-icon bi bi-arrow-down-up"></span></th>
+                <th data-col="slaStatus" id="colSlaHeader">SLA <span class="sort-icon bi bi-arrow-down-up"></span></th>
+              </tr>
+            </thead>
+            <tbody id="vmTableBody">
+              <tr><td colspan="12" class="text-center text-muted py-4">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pagination -->
+    <div id="pagination" class="d-flex align-items-center justify-content-between mt-2 hidden">
+      <span class="text-muted small" id="pageInfo"></span>
+      <div class="d-flex align-items-center gap-2">
+        <select id="pageSizeSelect" class="form-select form-select-sm" style="width:auto">
+          <option value="25">25 / page</option>
+          <option value="50" selected>50 / page</option>
+          <option value="100">100 / page</option>
+        </select>
+        <button class="btn btn-sm btn-outline-secondary" id="btnPrevPage">
+          <i class="bi bi-chevron-left"></i>
+        </button>
+        <button class="btn btn-sm btn-outline-secondary" id="btnNextPage">
+          <i class="bi bi-chevron-right"></i>
+        </button>
+      </div>
+    </div>
+
+    <div id="noResults" class="text-center text-muted py-5 hidden">
+      <i class="bi bi-inbox display-5"></i>
+      <p class="mt-2">No voicemails found for the selected filters.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Loading overlay -->
+<div id="loadingOverlay" class="hidden">
+  <div class="text-center">
+    <div class="spinner-border text-primary" style="width:3rem;height:3rem;"></div>
+    <p class="mt-2 fw-semibold text-muted" id="loadingMsg">Fetching voicemails…</p>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     SCRIPTS
+══════════════════════════════════════════════ -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/js/bootstrap.bundle.min.js"></script>
+<script>
+// ── State ───────────────────────────────────────────────────────────────────
+let viewMode        = 'queues';  // 'user' | 'queues'
+let currentPeriod   = '7d';
+let customDateFrom  = '';
+let customDateTo    = '';
+let currentFilterIds = new Set(); // empty = All; otherwise Set of selected extension IDs
+let currentStatus   = 'all';
+let sortCol         = 'dateTime';
+let sortDir         = 'desc';
+let allRecords      = [];
+let allExtensions   = [];        // cached from /api/extensions
+let autoTimer       = null;
+let usersEnabled    = false;     // whether the User Extensions view is available
+let slaEnabled      = true;      // whether SLA tracking is active
+let slaHours        = 4;         // callback SLA hours component
+let slaMinutes      = 0;         // callback SLA minutes component
+let pageSize        = 50;        // rows per page
+let currentPage     = 1;
+let lastFiltered    = [];        // sorted+filtered rows, shared between renderTable/renderPage
+let showStatedName  = false;     // whether Stated Name column is visible
+let showTranscript  = false;     // whether Transcript column is visible
+let transcriptsLoaded = false;   // true once enrichWithTranscripts has run for current allRecords
+let loadGeneration    = 0;         // incremented on each loadVoicemails() call; guards background enrichment
+
+// ── Init ────────────────────────────────────────────────────────────────────
+(async function init() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.has('error')) {
+    document.getElementById('loginError').textContent = 'Login error: ' + params.get('error');
+    document.getElementById('loginError').classList.remove('hidden');
+  }
+
+  const authed = await fetch('/oauth/status').then(r => r.json()).catch(() => false);
+  if (!authed) {
+    document.getElementById('loginScreen').classList.remove('hidden');
+    return;
+  }
+
+  document.getElementById('loginScreen').classList.add('hidden');
+  document.getElementById('dashboard').classList.remove('hidden');
+  document.getElementById('navRight').classList.remove('hidden');
+
+  // Current user label
+  const me = await fetch('/api/me').then(r => r.json()).catch(() => null);
+  if (me && me.name) {
+    document.getElementById('navUser').textContent =
+      me.name + (me.extensionNumber ? '  (Ext. ' + me.extensionNumber + ')' : '');
+  }
+
+  await loadExtensions();
+  wireEvents();
+  await loadVoicemails();
+})();
+
+// ── Wire events ─────────────────────────────────────────────────────────────
+function wireEvents() {
+  // Period buttons
+  document.querySelectorAll('.btn-period').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.btn-period').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentPeriod  = btn.dataset.period;
+      customDateFrom = '';
+      customDateTo   = '';
+      document.getElementById('dateFrom').value = '';
+      document.getElementById('dateTo').value   = '';
+      updateClearDatesVisibility();
+      loadVoicemails();
+    });
+  });
+
+  // Custom date range
+  document.getElementById('dateFrom').addEventListener('change', e => {
+    customDateFrom = e.target.value;
+    if (customDateFrom) deactivatePeriodButtons();
+    updateClearDatesVisibility();
+    loadVoicemails();
+  });
+  document.getElementById('dateTo').addEventListener('change', e => {
+    customDateTo = e.target.value;
+    if (customDateTo) deactivatePeriodButtons();
+    updateClearDatesVisibility();
+    loadVoicemails();
+  });
+  document.getElementById('btnClearDates').addEventListener('click', () => {
+    customDateFrom = customDateTo = '';
+    document.getElementById('dateFrom').value = '';
+    document.getElementById('dateTo').value   = '';
+    updateClearDatesVisibility();
+    loadVoicemails();
+  });
+
+  // View toggle
+  document.querySelectorAll('.btn-view').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.btn-view').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      viewMode = btn.dataset.view;
+      currentFilterIds = new Set();
+      populateFilterDropdown();
+      updateViewUI();
+      loadVoicemails();
+    });
+  });
+
+  // Filter checkboxes are wired inside populateFilterDropdown() each time it rebuilds
+
+  // Status filter (client-side only — no API call needed)
+  document.getElementById('statusFilter').addEventListener('change', e => {
+    currentStatus = e.target.value;
+    currentPage   = 1;
+    renderTable(allRecords);
+  });
+
+  // SLA threshold — re-render in place, no API call needed
+  function onSlaChange() {
+    const h = parseInt(document.getElementById('slaHoursInput').value, 10);
+    const m = parseInt(document.getElementById('slaMinutesInput').value, 10);
+    slaHours   = isNaN(h) || h < 0 ? 0 : h;
+    slaMinutes = isNaN(m) || m < 0 ? 0 : Math.min(m, 59);
+    // Require at least 1 minute total
+    if (slaHours === 0 && slaMinutes === 0) { slaMinutes = 1; document.getElementById('slaMinutesInput').value = 1; }
+    renderTable(allRecords);
+    updateSummary(allRecords);
+  }
+  document.getElementById('slaHoursInput').addEventListener('change', onSlaChange);
+  document.getElementById('slaMinutesInput').addEventListener('change', onSlaChange);
+
+  // Users toggle — show/hide the User Extensions view button
+  document.getElementById('usersToggle').addEventListener('change', function () {
+    usersEnabled = this.checked;
+    const btnViewUsers = document.getElementById('btnViewUsers');
+    btnViewUsers.classList.toggle('hidden', !usersEnabled);
+
+    // If currently in user view and users are being disabled, switch to queues
+    if (!usersEnabled && viewMode === 'user') {
+      btnViewUsers.classList.remove('active');
+      document.querySelector('.btn-view[data-view="queues"]').classList.add('active');
+      viewMode = 'queues';
+      currentFilterIds = new Set();
+      populateFilterDropdown();
+      updateViewUI();
+      loadVoicemails();
+    }
+  });
+
+  // SLA toggle — show/hide inputs and the table column
+  document.getElementById('slaToggle').addEventListener('change', function () {
+    slaEnabled = this.checked;
+    document.getElementById('slaInputs').classList.toggle('hidden', !slaEnabled);
+    document.getElementById('colSlaHeader').classList.toggle('hidden', !slaEnabled);
+    renderTable(allRecords);
+    updateSummary(allRecords);
+  });
+
+  // Stated Name column toggle
+  document.getElementById('statedNameToggle').addEventListener('change', async function () {
+    showStatedName = this.checked;
+    document.getElementById('colStatedNameHeader').classList.toggle('hidden', !showStatedName);
+    if (showStatedName && !transcriptsLoaded) {
+      setTranscriptLoadingUI(true);
+      await enrichTranscripts();
+      setTranscriptLoadingUI(false);
+    }
+    currentPage = 1;
+    renderTable(allRecords);
+  });
+
+  // Transcript column toggle
+  document.getElementById('transcriptToggle').addEventListener('change', async function () {
+    showTranscript = this.checked;
+    document.getElementById('colTranscriptHeader').classList.toggle('hidden', !showTranscript);
+    if (showTranscript && !transcriptsLoaded) {
+      setTranscriptLoadingUI(true);
+      await enrichTranscripts();
+      setTranscriptLoadingUI(false);
+    }
+    currentPage = 1;
+    renderTable(allRecords);
+  });
+
+  // Refresh button
+  document.getElementById('btnRefresh').addEventListener('click', loadVoicemails);
+
+  // CSV export
+  document.getElementById('btnExportCsv').addEventListener('click', downloadCsv);
+
+  // Auto-refresh toggle
+  document.getElementById('btnToggleRefresh').addEventListener('click', toggleAutoRefresh);
+
+  // Pagination
+  document.getElementById('btnPrevPage').addEventListener('click', () => {
+    if (currentPage > 1) { currentPage--; renderPage(); }
+  });
+  document.getElementById('btnNextPage').addEventListener('click', () => {
+    if (currentPage < Math.ceil(lastFiltered.length / pageSize)) { currentPage++; renderPage(); }
+  });
+  document.getElementById('pageSizeSelect').addEventListener('change', e => {
+    pageSize    = parseInt(e.target.value, 10);
+    currentPage = 1;
+    renderPage();
+  });
+
+  // Sortable column headers
+  document.querySelectorAll('#vmTable th[data-col]').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.dataset.col;
+      if (sortCol === col) {
+        sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        sortCol = col;
+        sortDir = 'asc';
+      }
+      updateSortHeaders();
+      renderTable(allRecords);
+    });
+  });
+}
+
+function deactivatePeriodButtons() {
+  document.querySelectorAll('.btn-period').forEach(b => b.classList.remove('active'));
+}
+
+function updateClearDatesVisibility() {
+  const hasCustomDate = !!(customDateFrom || customDateTo);
+  document.getElementById('btnClearDates').classList.toggle('hidden', !hasCustomDate);
+}
+
+function updateViewUI() {
+  const colQueue = document.getElementById('colQueue');
+  colQueue.childNodes[0].textContent = (viewMode === 'queues' ? 'Queue' : 'Extension') + ' ';
+}
+
+// ── SLA helper ───────────────────────────────────────────────────────────────
+// Returns { label, sortKey, badgeClass } for a voicemail record.
+// sortKey drives the SLA column sort: On Time < Late < Overdue < Pending
+function getSlaStatus(vm) {
+  const vmTime       = vm.dateTime ? new Date(vm.dateTime).getTime() : null;
+  if (!vmTime) return { label: '—', sortKey: 4, badgeClass: 'bg-secondary' };
+
+  const slaThresholdMs = (slaHours * 60 + slaMinutes) * 60_000;
+
+  if (vm.callbackTime) {
+    const msToCallback = new Date(vm.callbackTime).getTime() - vmTime;
+    return msToCallback <= slaThresholdMs
+      ? { label: 'On Time', sortKey: 0, badgeClass: 'bg-success' }
+      : { label: 'Late',    sortKey: 1, badgeClass: 'bg-warning text-dark' };
+  }
+
+  const ageMs = Date.now() - vmTime;
+  return ageMs > slaThresholdMs
+    ? { label: 'Overdue', sortKey: 2, badgeClass: 'bg-danger' }
+    : { label: 'Pending', sortKey: 3, badgeClass: 'bg-secondary' };
+}
+
+// ── Background callback enrichment ──────────────────────────────────────────
+/**
+ * After the initial voicemail table renders, POST the minimal stub data
+ * (id, callerNumber, dateTime) to /api/voicemails/enrich-callbacks.
+ * The backend runs the same windowed outbound-call matching as before but
+ * only returns {id, callbackBy, callbackTime} — we merge those fields into
+ * allRecords and re-render.
+ *
+ * A `gen` stamp prevents a stale background enrichment from overwriting
+ * results that belong to a newer load triggered by a filter change.
+ */
+async function enrichCallbacksBackground(gen) {
+  if (allRecords.length === 0) return;
+  const badge = document.getElementById('callbackLoadingBadge');
+  if (badge) badge.classList.remove('hidden');
+  try {
+    const items = allRecords
+      .filter(r => r.callerNumber && r.dateTime)
+      .map(r => ({ id: r.id, callerNumber: r.callerNumber, dateTime: r.dateTime }));
+
+    if (items.length === 0) return;
+
+    const resp = await fetch('/api/voicemails/enrich-callbacks', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(items)
+    });
+
+    if (gen !== loadGeneration) return;  // filter changed while we were waiting
+    if (!resp.ok) return;
+
+    const enrichments = await resp.json();
+    if (gen !== loadGeneration) return;
+
+    const byId = new Map(enrichments.map(e => [e.id, e]));
+    allRecords = allRecords.map(r => {
+      const e = byId.get(r.id);
+      if (!e) return r;
+      return { ...r,
+        callbackBy:   e.callbackBy   ?? r.callbackBy,
+        callbackTime: e.callbackTime ?? r.callbackTime
+      };
+    });
+
+    renderTable(allRecords);
+    updateSummary(allRecords);
+
+  } catch (err) {
+    console.warn('[voicemail-tracker] Callback enrichment failed:', err.message);
+  } finally {
+    if (gen === loadGeneration && badge) badge.classList.add('hidden');
+  }
+}
+
+// ── Extension list ───────────────────────────────────────────────────────────
+async function loadExtensions() {
+  try {
+    allExtensions = await fetch('/api/extensions').then(r => r.json());
+    populateFilterDropdown();
+  } catch (err) {
+    console.warn('Could not load extensions:', err);
+  }
+}
+
+function populateFilterDropdown() {
+  const menu   = document.getElementById('filterMenu');
+  const isUser = viewMode === 'user';
+  const items  = isUser
+    ? allExtensions.filter(e => e.type === 'User' && e.name)
+    : allExtensions.filter(e => e.type === 'Department' && e.name);
+
+  const allLabel = isUser ? 'All Users' : 'All Queues';
+
+  // Remove IDs no longer valid in the new view
+  const validIds = new Set(items.map(i => i.id));
+  for (const id of currentFilterIds) {
+    if (!validIds.has(id)) currentFilterIds.delete(id);
+  }
+
+  menu.innerHTML = '';
+
+  // "All" checkbox at top
+  const allDiv = document.createElement('div');
+  allDiv.className = 'form-check';
+  allDiv.innerHTML =
+    `<input class="form-check-input" type="checkbox" id="filterCheckAll" value="all"` +
+    ` ${currentFilterIds.size === 0 ? 'checked' : ''}>` +
+    `<label class="form-check-label fw-semibold" for="filterCheckAll">${allLabel}</label>`;
+  menu.appendChild(allDiv);
+
+  // Divider
+  const divider = document.createElement('div');
+  divider.className = 'filter-divider';
+  menu.appendChild(divider);
+
+  // One checkbox per extension / queue
+  items.forEach(item => {
+    const div = document.createElement('div');
+    div.className = 'form-check';
+    const label = item.name + (item.extensionNumber ? ' (' + item.extensionNumber + ')' : '');
+    div.innerHTML =
+      `<input class="form-check-input" type="checkbox" id="filterCheck_${item.id}" value="${item.id}"` +
+      ` ${currentFilterIds.has(item.id) ? 'checked' : ''}>` +
+      `<label class="form-check-label" for="filterCheck_${item.id}">${esc(label)}</label>`;
+    menu.appendChild(div);
+  });
+
+  // Wire change handlers
+  menu.querySelectorAll('.form-check-input').forEach(cb => {
+    cb.addEventListener('change', onFilterCheckChange);
+  });
+
+  updateFilterLabel();
+}
+
+function onFilterCheckChange(e) {
+  const val   = e.target.value;
+  const allCb = document.getElementById('filterCheckAll');
+
+  if (val === 'all') {
+    // "All" clicked → clear individual selections
+    currentFilterIds = new Set();
+    document.querySelectorAll('#filterMenu .form-check-input').forEach(cb => {
+      cb.checked = (cb.value === 'all');
+    });
+  } else {
+    if (e.target.checked) {
+      currentFilterIds.add(val);
+    } else {
+      currentFilterIds.delete(val);
+    }
+    // Sync the "All" checkbox
+    allCb.checked = (currentFilterIds.size === 0);
+  }
+
+  updateFilterLabel();
+  currentPage = 1;
+  renderTable(allRecords); // client-side only; Refresh button re-fetches from the server
+}
+
+function updateFilterLabel() {
+  const isUser   = viewMode === 'user';
+  const allLabel = isUser ? 'All Users' : 'All Queues';
+  const btn      = document.getElementById('filterDropBtn');
+
+  if (currentFilterIds.size === 0) {
+    btn.textContent = allLabel;
+  } else if (currentFilterIds.size === 1) {
+    const id   = [...currentFilterIds][0];
+    const item = allExtensions.find(e => e.id === id);
+    btn.textContent = item ? item.name : allLabel;
+  } else {
+    btn.textContent = currentFilterIds.size + ' selected';
+  }
+}
+
+// ── Data loading ─────────────────────────────────────────────────────────────
+async function loadVoicemails() {
+  const gen = ++loadGeneration;         // stamp this request generation
+
+  const loadingMsg = viewMode === 'queues'
+    ? 'Fetching all queue voicemails…'
+    : 'Fetching all user voicemails…';
+
+  showLoading(true, loadingMsg);
+  try {
+    const p = new URLSearchParams();
+
+    if (customDateFrom || customDateTo) {
+      if (customDateFrom) p.set('dateFrom', customDateFrom);
+      if (customDateTo)   p.set('dateTo',   customDateTo);
+    } else {
+      p.set('period', currentPeriod);
+    }
+
+    // withCallbacks is intentionally NOT set here.
+    // Voicemails render immediately; callbacks load in the background via
+    // enrichCallbacksBackground() so the table is never blocked by the
+    // N-per-caller-number RC call-log API calls.
+
+    let records;
+
+    if (currentFilterIds.size > 0) {
+      // Specific queues/users selected — fetch each one individually (sequential
+      // to avoid saturating the RC rate limit with parallel backend requests).
+      const results = [];
+      for (const id of currentFilterIds) {
+        if (gen !== loadGeneration) return;  // user changed filter mid-flight
+        const qp = new URLSearchParams(p);
+        qp.set('extensionId', id);
+        const r = await fetch('/api/voicemails?' + qp.toString());
+        if (r.status === 401) { location.reload(); return; }
+        if (r.ok) {
+          const recs = await r.json();
+          // Force-set extensionId/Name/Type on each record — the RC message-store
+          // API sometimes returns null in msg.to[0].extensionId for queue voicemails,
+          // which would break the client-side filter in renderTable.
+          const ext = allExtensions.find(e => e.id === id);
+          recs.forEach(rec => {
+            rec.extensionId   = id;
+            if (ext) {
+              if (!rec.extensionName) rec.extensionName = ext.name;
+              rec.extensionType = ext.type; // 'Department' or 'User'
+            }
+          });
+          results.push(recs);
+        } else {
+          results.push([]);
+        }
+      }
+      records = results.flat();
+    } else {
+      // All — use the aggregate endpoint
+      const url = viewMode === 'queues'
+        ? '/api/voicemails/queues?' + p.toString()
+        : '/api/voicemails/users?'  + p.toString();
+      const resp = await fetch(url);
+      if (resp.status === 401) { location.reload(); return; }
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ error: resp.statusText }));
+        alert('Error: ' + (err.error || resp.statusText));
+        return;
+      }
+      records = await resp.json();
+    }
+
+    if (gen !== loadGeneration) return;  // stale — a newer load superseded this one
+
+    allRecords        = records;
+    transcriptsLoaded = false; // new data — transcripts must be re-fetched if columns are active
+    currentPage       = 1;
+
+    // If transcript columns are on, enrich straight away so the user sees data
+    if (showStatedName || showTranscript) {
+      setTranscriptLoadingUI(true);
+      await enrichTranscripts();
+      setTranscriptLoadingUI(false);
+    }
+
+    renderTable(allRecords);
+    updateSummary(allRecords);
+    document.getElementById('lastRefreshed').textContent =
+      'Last refreshed: ' + new Date().toLocaleTimeString();
+
+    // Kick off background callback enrichment — does NOT block the UI
+    enrichCallbacksBackground(gen);
+
+  } catch (err) {
+    if (gen === loadGeneration) alert('Fetch error: ' + err.message);
+  } finally {
+    showLoading(false);
+  }
+}
+
+// ── Transcript enrichment ─────────────────────────────────────────────────────
+
+/**
+ * Shows/hides the loading spinners on both transcript toggles and disables
+ * both inputs while a fetch is in progress.
+ */
+function setTranscriptLoadingUI(loading) {
+  document.getElementById('statedNameSpinner').classList.toggle('hidden', !loading);
+  document.getElementById('transcriptSpinner').classList.toggle('hidden', !loading);
+  document.getElementById('statedNameToggle').disabled = loading;
+  document.getElementById('transcriptToggle').disabled = loading;
+}
+
+/**
+ * POSTs the current allRecords to /api/voicemails/enrich-transcripts.
+ * The backend fetches the AudioTranscription attachment for each record that
+ * has a transcriptAttachmentId, extracts a stated caller name, and returns
+ * [{id, transcript, statedCallerName}].  The results are merged back into
+ * allRecords in-place.
+ *
+ * Rate-limited server-side (1.2 s per record), so this can take a while for
+ * large sets.  The UI shows a spinner on both column toggles while it runs.
+ */
+async function enrichTranscripts() {
+  if (transcriptsLoaded || allRecords.length === 0) return;
+
+  const eligible = allRecords.filter(r => r.transcriptAttachmentId && r.extensionId && r.id);
+  if (eligible.length === 0) {
+    transcriptsLoaded = true;
+    return;
+  }
+
+  try {
+    const payload = eligible.map(r => ({
+      id: r.id,
+      extensionId: r.extensionId,
+      transcriptAttachmentId: r.transcriptAttachmentId
+    }));
+
+    const resp = await fetch('/api/voicemails/enrich-transcripts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (resp.status === 401) { location.reload(); return; }
+    if (!resp.ok) {
+      console.warn('Transcript enrichment failed:', resp.statusText);
+      return;
+    }
+
+    const enriched = await resp.json();
+    // Build a lookup by id for efficient merging
+    const byId = {};
+    enriched.forEach(e => { byId[e.id] = e; });
+
+    // Merge transcript + statedCallerName back into allRecords
+    allRecords = allRecords.map(r => {
+      const e = byId[r.id];
+      return e ? { ...r, ...e } : r;
+    });
+
+    transcriptsLoaded = true;
+  } catch (err) {
+    console.error('Transcript enrichment error:', err);
+  }
+}
+
+// ── Table rendering ───────────────────────────────────────────────────────────
+function renderTable(records) {
+  // Client-side extension / queue multi-select filter
+  let filtered = currentFilterIds.size > 0
+    ? records.filter(r => currentFilterIds.has(r.extensionId))
+    : records;
+
+  // Client-side status filter
+  if (currentStatus !== 'all') {
+    filtered = filtered.filter(r => r.readStatus === currentStatus);
+  }
+
+  // Attach computed SLA status once so sort and render both use the same value
+  filtered = filtered.map(vm => ({ ...vm, _sla: getSlaStatus(vm) }));
+
+  // Sort
+  filtered = [...filtered].sort((a, b) => {
+    if (sortCol === 'slaStatus') {
+      const cmp = a._sla.sortKey - b._sla.sortKey;
+      return sortDir === 'asc' ? cmp : -cmp;
+    }
+    const av  = a[sortCol] || '';
+    const bv  = b[sortCol] || '';
+    const cmp = av.localeCompare(bv, undefined, { sensitivity: 'base' });
+    return sortDir === 'asc' ? cmp : -cmp;
+  });
+
+  lastFiltered = filtered;
+
+  const noRes = document.getElementById('noResults');
+  if (filtered.length === 0) {
+    document.getElementById('vmTableBody').innerHTML = '';
+    document.getElementById('pagination').classList.add('hidden');
+    noRes.classList.remove('hidden');
+    return;
+  }
+  noRes.classList.add('hidden');
+
+  renderPage();
+}
+
+// Renders just the current page slice — called by pagination controls too.
+function renderPage() {
+  const totalPages = Math.ceil(lastFiltered.length / pageSize);
+  if (currentPage > totalPages) currentPage = Math.max(1, totalPages);
+
+  const start    = (currentPage - 1) * pageSize;
+  const end      = Math.min(start + pageSize, lastFiltered.length);
+  const pageRows = lastFiltered.slice(start, end);
+
+  document.getElementById('vmTableBody').innerHTML = pageRows.map(vm => {
+    const sla = vm._sla;
+    return `
+    <tr class="${vm.readStatus === 'Unread' ? 'table-warning' : ''}">
+      <td><span class="badge ${vm.readStatus === 'Unread' ? 'badge-unread' : 'badge-read'}">${vm.readStatus || '—'}</span></td>
+      <td>
+        ${esc(vm.callerName) || '<span class="text-muted">Unknown</span>'}
+        ${vm.statedCallerName && vm.statedCallerName !== vm.callerName
+          ? `<br><small class="text-muted" title="Name stated in voicemail transcript"><i class="bi bi-mic-fill"></i> ${esc(vm.statedCallerName)}</small>`
+          : ''}
+      </td>
+      <td class="text-nowrap">${esc(vm.callerNumber) || '<span class="text-muted">—</span>'}</td>
+      <td>${esc(vm.extensionName) || '<span class="text-muted">—</span>'}</td>
+      <td><span class="badge ${vm.extensionType === 'Department' ? 'bg-info text-dark' : 'bg-secondary'}">${vm.extensionType === 'Department' ? 'Queue' : 'User'}</span></td>
+      <td class="text-nowrap">${fmtDT(vm.dateTime)}</td>
+      <td class="text-nowrap">${fmtDur(vm.duration)}</td>
+      ${showStatedName ? `<td>${esc(vm.statedCallerName) || '<span class="text-muted">—</span>'}</td>` : ''}
+      ${showTranscript ? (() => {
+          const t = vm.transcript || '';
+          const preview = t.length > 120 ? t.slice(0, 120) + '…' : t;
+          return `<td class="transcript-cell" title="${esc(t)}">${esc(preview) || '<span class="text-muted">—</span>'}</td>`;
+        })() : ''}
+      <td>${esc(vm.callbackBy) || '<span class="text-muted">—</span>'}</td>
+      <td class="text-nowrap">${vm.callbackTime ? fmtDT(vm.callbackTime) : '<span class="text-muted">—</span>'}</td>
+      ${slaEnabled ? `<td><span class="badge ${sla.badgeClass}">${sla.label}</span></td>` : ''}
+    </tr>`;
+  }).join('');
+
+  // Show/hide pagination bar
+  const pag = document.getElementById('pagination');
+  if (lastFiltered.length > pageSize) {
+    pag.classList.remove('hidden');
+    document.getElementById('pageInfo').textContent =
+      `Showing ${start + 1}–${end} of ${lastFiltered.length}`;
+    document.getElementById('btnPrevPage').disabled = currentPage <= 1;
+    document.getElementById('btnNextPage').disabled = currentPage >= totalPages;
+  } else {
+    pag.classList.add('hidden');
+  }
+}
+
+// ── Sort headers ─────────────────────────────────────────────────────────────
+function updateSortHeaders() {
+  document.querySelectorAll('#vmTable th[data-col]').forEach(th => {
+    const icon = th.querySelector('.sort-icon');
+    th.classList.remove('sorted');
+    if (th.dataset.col === sortCol) {
+      th.classList.add('sorted');
+      icon.className = 'sort-icon bi ' + (sortDir === 'asc' ? 'bi-arrow-up' : 'bi-arrow-down');
+    } else {
+      icon.className = 'sort-icon bi bi-arrow-down-up';
+    }
+  });
+}
+
+// ── Summary ───────────────────────────────────────────────────────────────────
+function updateSummary(records) {
+  const unread  = records.filter(r => r.readStatus === 'Unread').length;
+  const overdue = records.filter(r => getSlaStatus(r).label === 'Overdue').length;
+  const pending = records.filter(r => !r.callbackTime).length; // all without a callback (includes overdue)
+  document.getElementById('totalCount').textContent   = records.length;
+  document.getElementById('unreadCount').textContent  = unread;
+  document.getElementById('readCount').textContent    = records.length - unread;
+  document.getElementById('overdueCount').textContent = overdue;
+  document.getElementById('pendingCount').textContent = pending;
+}
+
+// ── CSV Export ────────────────────────────────────────────────────────────────
+function downloadCsv() {
+  if (!lastFiltered.length) {
+    alert('Nothing to export — adjust your filters and try again.');
+    return;
+  }
+
+  const extHeader = viewMode === 'queues' ? 'Queue' : 'Extension';
+  const headers   = [
+    'Status', 'Caller Name', 'Caller Number', extHeader,
+    'Type', 'Date & Time', 'Duration', 'Called Back By', 'Callback Time',
+    ...(slaEnabled    ? ['SLA Status']  : []),
+    ...(showStatedName ? ['Stated Name'] : []),
+    ...(showTranscript ? ['Transcript']  : [])
+  ];
+
+  const rows = lastFiltered.map(vm => [
+    vm.readStatus    || '',
+    vm.callerName    || (vm.statedCallerName ? `[${vm.statedCallerName}]` : ''),
+    vm.callerNumber  || '',
+    vm.extensionName || '',
+    vm.extensionType === 'Department' ? 'Queue' : 'User',
+    vm.dateTime     ? new Date(vm.dateTime).toLocaleString()     : '',
+    fmtDur(vm.duration),
+    vm.callbackBy   || '',
+    vm.callbackTime ? new Date(vm.callbackTime).toLocaleString() : '',
+    ...(slaEnabled    ? [(vm._sla || getSlaStatus(vm)).label] : []),
+    ...(showStatedName ? [vm.statedCallerName || '']           : []),
+    ...(showTranscript ? [vm.transcript       || '']           : [])
+  ]);
+
+  const csv = [headers, ...rows]
+    .map(row => row.map(cell => '"' + String(cell).replace(/"/g, '""') + '"').join(','))
+    .join('\r\n');
+
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = 'voicemails-' + new Date().toISOString().slice(0, 10) + '.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── Auto-refresh ──────────────────────────────────────────────────────────────
+function toggleAutoRefresh() {
+  if (autoTimer) {
+    clearInterval(autoTimer);
+    autoTimer = null;
+    document.getElementById('autoRefreshBadge').classList.add('hidden');
+  } else {
+    autoTimer = setInterval(loadVoicemails, 60_000);
+    document.getElementById('autoRefreshBadge').classList.remove('hidden');
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function showLoading(on, msg = 'Fetching voicemails…') {
+  document.getElementById('loadingMsg').textContent = msg;
+  document.getElementById('loadingOverlay').classList.toggle('hidden', !on);
+}
+
+function esc(s) {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function fmtDur(seconds) {
+  if (!seconds && seconds !== 0) return '—';
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function fmtDT(iso) {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      month: 'short', day: 'numeric', year: 'numeric',
+      hour: 'numeric', minute: '2-digit'
+    });
+  } catch { return iso; }
+}
+</script>
+</body>
+</html>
