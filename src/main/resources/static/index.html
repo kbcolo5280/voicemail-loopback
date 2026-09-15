@@ -133,14 +133,10 @@
     <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
       <span class="fw-semibold text-nowrap small">Period</span>
       <div class="btn-group btn-group-sm" id="periodGroup">
+        <button class="btn btn-outline-secondary btn-period active" data-period="24h">Last 24h</button>
         <button class="btn btn-outline-secondary btn-period" data-period="today">Today</button>
-        <button class="btn btn-outline-secondary btn-period active" data-period="7d">7 Days</button>
+        <button class="btn btn-outline-secondary btn-period" data-period="7d">7 Days</button>
         <button class="btn btn-outline-secondary btn-period" data-period="30d">30 Days</button>
-        <button class="btn btn-outline-secondary btn-period" data-period="60d">60 Days</button>
-        <button class="btn btn-outline-secondary btn-period" data-period="90d">90 Days</button>
-        <button class="btn btn-outline-secondary btn-period" data-period="180d">180 Days</button>
-        <button class="btn btn-outline-secondary btn-period" data-period="ytd">Year to Date</button>
-        <button class="btn btn-outline-secondary btn-period" data-period="all">All</button>
       </div>
 
       <div class="separator d-none d-md-block"></div>
@@ -236,10 +232,7 @@
         </label>
       </div>
 
-      <button class="btn btn-sm btn-outline-primary ms-auto" id="btnRefresh">
-        <i class="bi bi-arrow-clockwise"></i> Refresh
-      </button>
-      <button class="btn btn-sm btn-outline-success" id="btnExportCsv" title="Export current view to CSV">
+      <button class="btn btn-sm btn-outline-success ms-auto" id="btnExportCsv" title="Export current view to CSV">
         <i class="bi bi-download"></i> Export CSV
       </button>
     </div>
@@ -253,6 +246,14 @@
     <span><strong id="overdueCount" class="text-danger">0</strong> overdue</span>
     <span><strong id="pendingCount" class="text-secondary">0</strong> pending callback</span>
     <span class="ms-auto" id="lastRefreshed"></span>
+  </div>
+
+  <!-- ── Deleted voicemail notice ── -->
+  <div id="vmDeletedNotice" class="alert alert-warning alert-dismissible fade show mb-0 px-3 py-2 rounded-0" role="alert" style="font-size:.84rem; border-left:none; border-right:none; border-radius:0!important;">
+    <i class="bi bi-exclamation-triangle-fill me-1"></i>
+    <strong>Important:</strong> Voicemails deleted by users are permanently removed from this view and cannot be recovered.
+    Use the <strong>Export CSV</strong> button regularly to maintain a permanent record of all voicemail activity — including callbacks.
+    <button type="button" class="btn-close py-2" data-bs-dismiss="alert" aria-label="Close"></button>
   </div>
 
   <!-- ── Table ── -->
@@ -325,7 +326,7 @@
 <script>
 // ── State ───────────────────────────────────────────────────────────────────
 let viewMode        = 'queues';  // 'user' | 'queues'
-let currentPeriod   = '7d';
+let currentPeriod   = '24h';
 let customDateFrom  = '';
 let customDateTo    = '';
 let currentFilterIds = new Set(); // empty = All; otherwise Set of selected extension IDs
@@ -374,6 +375,7 @@ let loadGeneration    = 0;         // incremented on each loadVoicemails() call;
 
   await loadExtensions();
   wireEvents();
+  toggleAutoRefresh();   // start auto-refresh automatically on login
   await loadVoicemails();
 })();
 
@@ -397,12 +399,30 @@ function wireEvents() {
   // Custom date range
   document.getElementById('dateFrom').addEventListener('change', e => {
     customDateFrom = e.target.value;
+    if (customDateFrom && customDateTo) {
+      const diffDays = (new Date(customDateTo) - new Date(customDateFrom)) / 86_400_000;
+      if (diffDays > 30) {
+        const clamped = new Date(new Date(customDateFrom).getTime() + 30 * 86_400_000);
+        customDateTo = clamped.toISOString().slice(0, 10);
+        document.getElementById('dateTo').value = customDateTo;
+        alert('Date range is capped at 30 days. End date adjusted automatically.');
+      }
+    }
     if (customDateFrom) deactivatePeriodButtons();
     updateClearDatesVisibility();
     loadVoicemails();
   });
   document.getElementById('dateTo').addEventListener('change', e => {
     customDateTo = e.target.value;
+    if (customDateFrom && customDateTo) {
+      const diffDays = (new Date(customDateTo) - new Date(customDateFrom)) / 86_400_000;
+      if (diffDays > 30) {
+        const clamped = new Date(new Date(customDateTo).getTime() - 30 * 86_400_000);
+        customDateFrom = clamped.toISOString().slice(0, 10);
+        document.getElementById('dateFrom').value = customDateFrom;
+        alert('Date range is capped at 30 days. Start date adjusted automatically.');
+      }
+    }
     if (customDateTo) deactivatePeriodButtons();
     updateClearDatesVisibility();
     loadVoicemails();
@@ -503,9 +523,6 @@ function wireEvents() {
     currentPage = 1;
     renderTable(allRecords);
   });
-
-  // Refresh button
-  document.getElementById('btnRefresh').addEventListener('click', loadVoicemails);
 
   // CSV export
   document.getElementById('btnExportCsv').addEventListener('click', downloadCsv);
@@ -749,6 +766,15 @@ async function loadVoicemails() {
     if (customDateFrom || customDateTo) {
       if (customDateFrom) p.set('dateFrom', customDateFrom);
       if (customDateTo)   p.set('dateTo',   customDateTo);
+    } else if (currentPeriod === '24h') {
+      // Rolling last-24-hours: pass explicit date range so the backend doesn't need
+      // to know about the '24h' period key.
+      const now   = new Date();
+      const ago24 = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      // Use date-only strings (YYYY-MM-DD) to stay compatible with the existing
+      // dateFrom/dateTo backend parameter parsing.
+      p.set('dateFrom', ago24.toISOString().slice(0, 10));
+      p.set('dateTo',   now.toISOString().slice(0, 10));
     } else {
       p.set('period', currentPeriod);
     }
