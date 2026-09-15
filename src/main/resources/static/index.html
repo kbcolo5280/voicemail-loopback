@@ -355,6 +355,7 @@ let showStatedName  = true;      // VM Captured Name column is always visible
 let showTranscript  = false;     // whether Transcript column is visible
 let transcriptsLoaded = false;   // true once enrichWithTranscripts has run for current allRecords
 let loadGeneration    = 0;         // incremented on each loadVoicemails() call; guards background enrichment
+let enrichmentCache   = {};       // keyed by message id; persists across refreshes to avoid re-fetching RC data
 
 // ── Init ────────────────────────────────────────────────────────────────────
 (async function init() {
@@ -607,7 +608,7 @@ async function enrichCallbacksBackground(gen) {
   if (badge) badge.classList.remove('hidden');
   try {
     const items = allRecords
-      .filter(r => r.callerNumber && r.dateTime)
+      .filter(r => r.callerNumber && r.dateTime && !(enrichmentCache[r.id] && enrichmentCache[r.id].callbackBy))
       .map(r => ({ id: r.id, callerNumber: r.callerNumber, dateTime: r.dateTime }));
 
     if (items.length === 0) return;
@@ -628,6 +629,10 @@ async function enrichCallbacksBackground(gen) {
     allRecords = allRecords.map(r => {
       const e = byId.get(r.id);
       if (!e) return r;
+      // Save to persistent cache
+      if (!enrichmentCache[r.id]) enrichmentCache[r.id] = {};
+      if (e.callbackBy)   enrichmentCache[r.id].callbackBy   = e.callbackBy;
+      if (e.callbackTime) enrichmentCache[r.id].callbackTime = e.callbackTime;
       return { ...r,
         callbackBy:   e.callbackBy   ?? r.callbackBy,
         callbackTime: e.callbackTime ?? r.callbackTime
@@ -827,8 +832,16 @@ async function loadVoicemails() {
 
     if (gen !== loadGeneration) return;  // stale — a newer load superseded this one
 
-    allRecords        = records;
-    transcriptsLoaded = false; // new data — transcripts must be re-fetched if columns are active
+    // Apply any previously cached enrichment to avoid re-fetching on refresh
+    allRecords = records.map(r => {
+      const cached = enrichmentCache[r.id];
+      return cached ? { ...r, ...cached } : r;
+    });
+    // Only re-enrich transcripts for records not already in cache
+    const uncachedEligible = allRecords.filter(r =>
+      r.transcriptAttachmentId && r.extensionId && r.id && !enrichmentCache[r.id]
+    );
+    transcriptsLoaded = uncachedEligible.length === 0;
     currentPage       = 1;
 
     // If transcript columns are on, enrich straight away so the user sees data
@@ -877,7 +890,9 @@ function setTranscriptLoadingUI(loading) {
 async function enrichTranscripts() {
   if (transcriptsLoaded || allRecords.length === 0) return;
 
-  const eligible = allRecords.filter(r => r.transcriptAttachmentId && r.extensionId && r.id);
+  const eligible = allRecords.filter(r =>
+    r.transcriptAttachmentId && r.extensionId && r.id && !enrichmentCache[r.id]
+  );
   if (eligible.length === 0) {
     transcriptsLoaded = true;
     return;
@@ -903,9 +918,14 @@ async function enrichTranscripts() {
     }
 
     const enriched = await resp.json();
-    // Build a lookup by id for efficient merging
+    // Build a lookup by id for efficient merging, and save to persistent cache
     const byId = {};
-    enriched.forEach(e => { byId[e.id] = e; });
+    enriched.forEach(e => {
+      byId[e.id] = e;
+      if (!enrichmentCache[e.id]) enrichmentCache[e.id] = {};
+      if (e.transcript)       enrichmentCache[e.id].transcript       = e.transcript;
+      if (e.statedCallerName) enrichmentCache[e.id].statedCallerName = e.statedCallerName;
+    });
 
     // Merge transcript + statedCallerName back into allRecords
     allRecords = allRecords.map(r => {
