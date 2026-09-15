@@ -78,6 +78,10 @@
     .transcript-cell { max-width: 260px; overflow: hidden; text-overflow: ellipsis;
                        white-space: nowrap; font-size: .80rem; color: #6c757d; cursor: help; }
 
+    /* ── Stated name cell — truncate to a name-length max ── */
+    .stated-name-cell { max-width: 160px; overflow: hidden; text-overflow: ellipsis;
+                        white-space: nowrap; cursor: help; }
+
     /* ── Multi-select filter dropdown ── */
     #filterMenu .form-check { padding: .3rem .6rem .3rem 1.75em; border-radius: .25rem; cursor: pointer; white-space: nowrap; }
     #filterMenu .form-check:hover { background: #f0f2f5; }
@@ -224,15 +228,6 @@
       <span class="fw-semibold text-nowrap small">Columns</span>
 
       <div class="form-check form-switch mb-0 d-flex align-items-center gap-1"
-           title="Show a column with the caller name stated in the voicemail (extracted from transcript)">
-        <input class="form-check-input" type="checkbox" id="statedNameToggle" style="cursor:pointer;">
-        <label class="form-check-label text-nowrap small d-flex align-items-center gap-1" for="statedNameToggle">
-          <i class="bi bi-mic-fill"></i> Stated Name
-          <span id="statedNameSpinner" class="spinner-border spinner-border-sm hidden" role="status" aria-hidden="true"></span>
-        </label>
-      </div>
-
-      <div class="form-check form-switch mb-0 d-flex align-items-center gap-1"
            title="Show a column with the full voicemail-to-text transcript">
         <input class="form-check-input" type="checkbox" id="transcriptToggle" style="cursor:pointer;">
         <label class="form-check-label text-nowrap small d-flex align-items-center gap-1" for="transcriptToggle">
@@ -283,7 +278,7 @@
                 <th data-col="extensionType">Type <span class="sort-icon bi bi-arrow-down-up"></span></th>
                 <th data-col="dateTime" class="sorted">Date &amp; Time <span class="sort-icon bi bi-arrow-down"></span></th>
                 <th data-col="duration">Duration <span class="sort-icon bi bi-arrow-down-up"></span></th>
-                <th data-col="statedCallerName" id="colStatedNameHeader" class="hidden"><i class="bi bi-mic-fill"></i> Stated Name <span class="sort-icon bi bi-arrow-down-up"></span></th>
+                <th data-col="statedCallerName" id="colStatedNameHeader"><i class="bi bi-mic-fill"></i> VM Captured Name <span class="sort-icon bi bi-arrow-down-up"></span></th>
                 <th id="colTranscriptHeader" class="hidden"><i class="bi bi-chat-text"></i> Transcript</th>
                 <th data-col="callbackBy">Called Back By <span class="sort-icon bi bi-arrow-down-up"></span></th>
                 <th data-col="callbackTime">Callback Time <span class="sort-icon bi bi-arrow-down-up"></span></th>
@@ -355,7 +350,7 @@ let slaMinutes      = 0;         // callback SLA minutes component
 let pageSize        = 50;        // rows per page
 let currentPage     = 1;
 let lastFiltered    = [];        // sorted+filtered rows, shared between renderTable/renderPage
-let showStatedName  = false;     // whether Stated Name column is visible
+let showStatedName  = true;      // VM Captured Name column is always visible
 let showTranscript  = false;     // whether Transcript column is visible
 let transcriptsLoaded = false;   // true once enrichWithTranscripts has run for current allRecords
 let loadGeneration    = 0;         // incremented on each loadVoicemails() call; guards background enrichment
@@ -993,18 +988,13 @@ function renderPage() {
     return `
     <tr class="${vm.readStatus === 'Unread' ? 'table-warning' : ''}">
       <td><span class="badge ${vm.readStatus === 'Unread' ? 'badge-unread' : 'badge-read'}">${vm.readStatus || '—'}</span></td>
-      <td>
-        ${esc(vm.callerName) || '<span class="text-muted">Unknown</span>'}
-        ${vm.statedCallerName && vm.statedCallerName !== vm.callerName
-          ? `<br><small class="text-muted" title="Name stated in voicemail transcript"><i class="bi bi-mic-fill"></i> ${esc(vm.statedCallerName)}</small>`
-          : ''}
-      </td>
+      <td>${esc(vm.callerName) || '<span class="text-muted">Unknown</span>'}</td>
       <td class="text-nowrap">${esc(vm.callerNumber) || '<span class="text-muted">—</span>'}</td>
       <td>${esc(vm.extensionName) || '<span class="text-muted">—</span>'}</td>
       <td><span class="badge ${vm.extensionType === 'Department' ? 'bg-info text-dark' : 'bg-secondary'}">${vm.extensionType === 'Department' ? 'Queue' : 'User'}</span></td>
       <td class="text-nowrap">${fmtDT(vm.dateTime)}</td>
       <td class="text-nowrap">${fmtDur(vm.duration)}</td>
-      ${showStatedName ? `<td>${esc(vm.statedCallerName) || '<span class="text-muted">—</span>'}</td>` : ''}
+      <td class="stated-name-cell" title="${esc(vm.statedCallerName) || ''}">${esc(vm.statedCallerName) || '<span class="text-muted">—</span>'}</td>
       ${showTranscript ? (() => {
           const t = vm.transcript || '';
           const preview = t.length > 120 ? t.slice(0, 120) + '…' : t;
