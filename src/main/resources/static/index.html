@@ -236,7 +236,10 @@
         </label>
       </div>
 
-      <button class="btn btn-sm btn-outline-success ms-auto" id="btnExportCsv" title="Export current view to CSV">
+      <button class="btn btn-sm btn-outline-secondary ms-auto me-1" id="btnRefresh" title="Refresh now">
+        <i class="bi bi-arrow-clockwise"></i> Refresh
+      </button>
+      <button class="btn btn-sm btn-outline-success" id="btnExportCsv" title="Export current view to CSV">
         <i class="bi bi-download"></i> Export CSV
       </button>
     </div>
@@ -521,6 +524,7 @@ function wireEvents() {
   });
 
   // CSV export
+  document.getElementById('btnRefresh').addEventListener('click', loadVoicemails);
   document.getElementById('btnExportCsv').addEventListener('click', downloadCsv);
 
   // Auto-refresh toggle
