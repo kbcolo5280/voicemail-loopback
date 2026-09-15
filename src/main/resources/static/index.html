@@ -505,19 +505,6 @@ function wireEvents() {
     updateSummary(allRecords);
   });
 
-  // Stated Name column toggle
-  document.getElementById('statedNameToggle').addEventListener('change', async function () {
-    showStatedName = this.checked;
-    document.getElementById('colStatedNameHeader').classList.toggle('hidden', !showStatedName);
-    if (showStatedName && !transcriptsLoaded) {
-      setTranscriptLoadingUI(true);
-      await enrichTranscripts();
-      setTranscriptLoadingUI(false);
-    }
-    currentPage = 1;
-    renderTable(allRecords);
-  });
-
   // Transcript column toggle
   document.getElementById('transcriptToggle').addEventListener('change', async function () {
     showTranscript = this.checked;
@@ -872,9 +859,7 @@ async function loadVoicemails() {
  * both inputs while a fetch is in progress.
  */
 function setTranscriptLoadingUI(loading) {
-  document.getElementById('statedNameSpinner').classList.toggle('hidden', !loading);
   document.getElementById('transcriptSpinner').classList.toggle('hidden', !loading);
-  document.getElementById('statedNameToggle').disabled = loading;
   document.getElementById('transcriptToggle').disabled = loading;
 }
 
