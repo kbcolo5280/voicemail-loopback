@@ -56,7 +56,16 @@
 
     /* ── Loading overlay ── */
     #loadingOverlay { position: fixed; inset: 0; background: rgba(255,255,255,.65);
-                      display: flex; align-items: center; justify-content: center; z-index: 9999; }
+                      display: flex; align-items: center; justify-content: center; z-index: 9999;
+                      transition: opacity .15s ease; }
+    #loadingOverlay.hidden { display: none !important; }
+
+    /* ── Inline refresh spinner (background refreshes) ── */
+    #refreshSpinner { display: inline-block; width: .85rem; height: .85rem;
+                      border: 2px solid #dee2e6; border-top-color: #0d6efd;
+                      border-radius: 50%; animation: spin .7s linear infinite;
+                      vertical-align: middle; margin-right: 4px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
 
     /* ── Login ── */
     #loginScreen { min-height: 82vh; display: flex; align-items: center; justify-content: center; }
@@ -245,7 +254,10 @@
     <span><strong id="readCount"    class="text-success">0</strong> read</span>
     <span><strong id="overdueCount" class="text-danger">0</strong> overdue</span>
     <span><strong id="pendingCount" class="text-secondary">0</strong> pending callback</span>
-    <span class="ms-auto" id="lastRefreshed"></span>
+    <span class="ms-auto" id="lastRefreshed">
+      <span id="refreshSpinner" style="display:none;"></span>
+      <span id="lastRefreshedText"></span>
+    </span>
   </div>
 
   <!-- ── Deleted voicemail notice ── -->
@@ -845,7 +857,7 @@ async function loadVoicemails() {
 
     renderTable(allRecords);
     updateSummary(allRecords);
-    document.getElementById('lastRefreshed').textContent =
+    document.getElementById('lastRefreshedText').textContent =
       'Last refreshed: ' + new Date().toLocaleTimeString();
 
     // Kick off background callback enrichment — does NOT block the UI
@@ -1101,8 +1113,22 @@ function toggleAutoRefresh() {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function showLoading(on, msg = 'Fetching voicemails…') {
-  document.getElementById('loadingMsg').textContent = msg;
-  document.getElementById('loadingOverlay').classList.toggle('hidden', !on);
+  const hasData = allRecords.length > 0;
+  const spinner = document.getElementById('refreshSpinner');
+
+  if (on) {
+    if (hasData) {
+      // Background refresh — just show the inline spinner, no overlay
+      spinner.style.display = 'inline-block';
+    } else {
+      // First load — show the full overlay
+      document.getElementById('loadingMsg').textContent = msg;
+      document.getElementById('loadingOverlay').classList.remove('hidden');
+    }
+  } else {
+    spinner.style.display = 'none';
+    document.getElementById('loadingOverlay').classList.add('hidden');
+  }
 }
 
 function esc(s) {
