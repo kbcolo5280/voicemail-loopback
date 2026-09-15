@@ -837,11 +837,7 @@ async function loadVoicemails() {
       const cached = enrichmentCache[r.id];
       return cached ? { ...r, ...cached } : r;
     });
-    // Only re-enrich transcripts for records not already in cache
-    const uncachedEligible = allRecords.filter(r =>
-      r.transcriptAttachmentId && r.extensionId && r.id && !enrichmentCache[r.id]
-    );
-    transcriptsLoaded = uncachedEligible.length === 0;
+    transcriptsLoaded = false; // let enrichTranscripts run; cache filter skips already-fetched records
     currentPage       = 1;
 
     // If transcript columns are on, enrich straight away so the user sees data
@@ -888,7 +884,7 @@ function setTranscriptLoadingUI(loading) {
  * large sets.  The UI shows a spinner on both column toggles while it runs.
  */
 async function enrichTranscripts() {
-  if (transcriptsLoaded || allRecords.length === 0) return;
+  if (allRecords.length === 0) return;
 
   const eligible = allRecords.filter(r =>
     r.transcriptAttachmentId && r.extensionId && r.id && !enrichmentCache[r.id]
