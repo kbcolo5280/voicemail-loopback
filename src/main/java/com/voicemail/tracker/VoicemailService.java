@@ -76,7 +76,7 @@ public class VoicemailService {
     // -----------------------------------------------------------------------
 
     private static final Pattern STATED_NAME_PATTERN = Pattern.compile(
-            "(?:this is|my name is|it'?s|i'?m)\\s+([A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)",
+            "(?:this is|my name is|it'?s|i'?m)\\s+([A-Z][a-zA-Z'-]+(?: [A-Z][a-zA-Z'-]+){0,2})",
             Pattern.CASE_INSENSITIVE);
 
     // -----------------------------------------------------------------------
