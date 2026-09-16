@@ -389,6 +389,7 @@ let enrichmentCache   = {};       // keyed by message id; persists across refres
   wireEvents();
   toggleAutoRefresh();   // start auto-refresh automatically on login
   await loadVoicemails();
+  connectSSE();   // start real-time SSE push updates
 })();
 
 // ── Wire events ─────────────────────────────────────────────────────────────
@@ -1110,6 +1111,34 @@ function toggleAutoRefresh() {
     autoTimer = setInterval(loadVoicemails, 60_000);
     document.getElementById('autoRefreshBadge').classList.remove('hidden');
   }
+}
+
+
+// ── Server-Sent Events ────────────────────────────────────────────────────────
+// Connects to /api/sse and listens for 'voicemail-update' events pushed by
+// the server when RingCentral delivers a webhook notification.  The existing
+// 60-second polling remains active as a silent fallback.
+let sseSource = null;
+
+function connectSSE() {
+  if (typeof EventSource === 'undefined') return; // browser doesn't support SSE
+  if (sseSource) { sseSource.close(); sseSource = null; }
+
+  sseSource = new EventSource('/api/sse');
+
+  sseSource.addEventListener('voicemail-update', () => {
+    console.log('[SSE] Voicemail update received — refreshing');
+    loadVoicemails();
+  });
+
+  sseSource.onopen = () => {
+    console.log('[SSE] Connected to real-time updates');
+  };
+
+  sseSource.onerror = () => {
+    // EventSource auto-reconnects on error — no manual action needed
+    console.warn('[SSE] Connection interrupted — browser will retry automatically');
+  };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

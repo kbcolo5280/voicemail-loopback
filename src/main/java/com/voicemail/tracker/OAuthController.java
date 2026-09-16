@@ -35,6 +35,9 @@ public class OAuthController {
     @Autowired
     private VoicemailService voicemailService;
 
+    @Autowired
+    private WebhookService webhookService;
+
     /**
      * Kick off the OAuth flow.  The session ID is used as the CSRF 'state'
      * parameter so we can verify the callback belongs to this browser session.
@@ -83,6 +86,9 @@ public class OAuthController {
 
             rc.authorize(code, config.getRedirectUri());
             tokenStore.save(session.getId(), rc.token);
+
+            // Register the RC webhook subscription on the first login (no-op after that)
+            webhookService.ensureRegistered(session.getId());
 
             return "redirect:/";
         } catch (Exception e) {
