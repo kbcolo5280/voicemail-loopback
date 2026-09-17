@@ -234,6 +234,7 @@ public class VoicemailService {
                 }
 
                 rec.setReadStatus(msg.readStatus);
+                rec.setDuration(msg.duration != null ? msg.duration.intValue() : 0);
                 rec.setDateTime(msg.creationTime);
 
                 if (msg.to != null && msg.to.length > 0) {
