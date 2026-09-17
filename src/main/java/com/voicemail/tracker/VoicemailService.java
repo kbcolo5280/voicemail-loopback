@@ -234,7 +234,6 @@ public class VoicemailService {
                 }
 
                 rec.setReadStatus(msg.readStatus);
-                rec.setDuration(msg.duration != null ? msg.duration.intValue() : 0);
                 rec.setDateTime(msg.creationTime);
 
                 if (msg.to != null && msg.to.length > 0) {
@@ -247,6 +246,9 @@ public class VoicemailService {
                     for (var att : msg.attachments) {
                         if ("AudioTranscription".equals(att.type) && att.id != null) {
                             rec.setTranscriptAttachmentId(att.id.toString());
+                        }
+                        if (att.vmDuration != null) {
+                            rec.setDuration(att.vmDuration.intValue());
                         }
                     }
                 }
