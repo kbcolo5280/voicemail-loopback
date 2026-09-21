@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Voicemail Loopback</title>
+  <title>Voicemail CallBack Tracker</title>
   <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/css/bootstrap.min.css" rel="stylesheet" />
   <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" />
   <style>
@@ -97,8 +97,12 @@
 ══════════════════════════════════════════════ -->
 <nav class="navbar navbar-dark bg-primary px-3">
   <span class="navbar-brand d-flex align-items-center gap-2">
-    <img src="logo.png" alt="Voicemail Loopback" height="36" style="border-radius:6px;" />
-    <span class="badge bg-secondary" style="font-size:.65rem;font-weight:500;">v1.0</span>
+    <i class="bi bi-voicemail fs-4"></i>
+    <span class="d-flex flex-column lh-1">
+      <span style="font-size:.95rem;font-weight:700;letter-spacing:.3px;">Voicemail CallBack Tracker</span>
+      <span class="text-white-50" style="font-size:.65rem;font-weight:400;letter-spacing:.4px;">RINGCENTRAL DASHBOARD</span>
+    </span>
+    <span class="badge bg-secondary ms-1" style="font-size:.6rem;font-weight:500;align-self:flex-start;">v1.0</span>
   </span>
   <div id="navRight" class="hidden d-flex align-items-center gap-3">
     <span class="text-white-50 small" id="navUser"></span>
@@ -123,7 +127,7 @@
 <div id="loginScreen">
   <div class="card shadow login-card text-center p-4">
     <div class="mb-3"><i class="bi bi-voicemail display-4 text-primary"></i></div>
-    <h4 class="mb-1">Voicemail Loopback</h4>
+    <h4 class="mb-1">Voicemail CallBack Tracker</h4>
     <p class="text-muted small mb-4">
       Sign in with your RingCentral account to view voicemail activity across users and call queues.
     </p>
