@@ -469,9 +469,17 @@ public class VoicemailService {
                                 vm.setCallbackBy(call.from.phoneNumber);
                             }
                         }
-                        // Capture recording ID if this callback call was recorded
-                        if (call.recording != null && call.recording.id != null) {
-                            vm.setCallbackRecordingId(call.recording.id.toString());
+                        // Capture recording ID if this callback call was recorded.
+                        // CallLogRecordingInfo has no .id field — extract the ID
+                        // from the trailing path segment of .uri:
+                        //   https://.../restapi/v1.0/account/~/recording/{id}
+                        if (call.recording != null && call.recording.uri != null
+                                && !call.recording.uri.isBlank()) {
+                            String recUri = call.recording.uri;
+                            String recId  = recUri.substring(recUri.lastIndexOf('/') + 1);
+                            if (!recId.isBlank()) {
+                                vm.setCallbackRecordingId(recId);
+                            }
                         }
                         callIdx++;
                     }
