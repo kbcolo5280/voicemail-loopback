@@ -543,7 +543,10 @@ function wireEvents() {
   });
 
   // CSV export
-  document.getElementById('btnRefresh').addEventListener('click', loadVoicemails);
+  document.getElementById('btnRefresh').addEventListener('click', () => {
+    lastCallbackCheck = 0;   // reset cooldown so manual refresh always re-fetches callbacks
+    loadVoicemails();
+  });
   document.getElementById('btnExportCsv').addEventListener('click', downloadCsv);
 
   // Auto-refresh toggle
