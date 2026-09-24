@@ -647,21 +647,27 @@ async function enrichCallbacksBackground(gen) {
     if (gen !== loadGeneration) return;
 
     const byId = new Map(enrichments.map(e => [e.id, e]));
-    // Mark every sent item as callback-checked so we never re-query it,
-    // even if RC returned no matching outbound call for it.
+    // Mark an item as callback-checked only once a callback is found.
+    // Items with no callback stay un-checked so that SSE-triggered refreshes
+    // (which fire after someone calls back) will re-query and pick up the
+    // callback without needing a full page reload.
     items.forEach(item => {
       if (!enrichmentCache[item.id]) enrichmentCache[item.id] = {};
-      enrichmentCache[item.id].callbackChecked = true;
+      // Will be set to true below if a match came back from the server
     });
     allRecords = allRecords.map(r => {
       const e = byId.get(r.id);
       if (!e) return r;
       // Save callback result to persistent cache
-      if (e.callbackBy)   enrichmentCache[r.id].callbackBy   = e.callbackBy;
-      if (e.callbackTime) enrichmentCache[r.id].callbackTime = e.callbackTime;
+      if (e.callbackBy)           enrichmentCache[r.id].callbackBy           = e.callbackBy;
+      if (e.callbackTime)         enrichmentCache[r.id].callbackTime         = e.callbackTime;
+      if (e.callbackRecordingId)  enrichmentCache[r.id].callbackRecordingId  = e.callbackRecordingId;
+      // Lock this record from future re-checks only once a callback is confirmed
+      if (e.callbackBy) enrichmentCache[r.id].callbackChecked = true;
       return { ...r,
-        callbackBy:   e.callbackBy   ?? r.callbackBy,
-        callbackTime: e.callbackTime ?? r.callbackTime
+        callbackBy:          e.callbackBy          ?? r.callbackBy,
+        callbackTime:        e.callbackTime        ?? r.callbackTime,
+        callbackRecordingId: e.callbackRecordingId ?? r.callbackRecordingId
       };
     });
 

@@ -185,8 +185,9 @@ public class VoicemailController {
             for (VoicemailRecord r : stubs) {
                 Map<String, String> m = new LinkedHashMap<>();
                 m.put("id", r.getId());
-                if (r.getCallbackBy()   != null) m.put("callbackBy",   r.getCallbackBy());
-                if (r.getCallbackTime() != null) m.put("callbackTime", r.getCallbackTime());
+                if (r.getCallbackBy()          != null) m.put("callbackBy",          r.getCallbackBy());
+                if (r.getCallbackTime()        != null) m.put("callbackTime",        r.getCallbackTime());
+                if (r.getCallbackRecordingId() != null) m.put("callbackRecordingId", r.getCallbackRecordingId());
                 result.add(m);
             }
 
