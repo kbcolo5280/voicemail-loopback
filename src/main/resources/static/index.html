@@ -88,7 +88,18 @@
     #filterMenu .form-check-input { cursor: pointer; }
     #filterMenu .form-check-label { cursor: pointer; font-size: .84rem; user-select: none; }
     #filterMenu .filter-divider { border-top: 1px solid #dee2e6; margin: .3rem 0; }
-  </style>
+  
+    /* ── Callback recording inline player ──────────────────────────────── */
+    .rec-audio-wrap {
+      display:flex; align-items:center; gap:6px; margin-top:6px;
+    }
+    .rec-audio-wrap audio {
+      height:28px; max-width:220px;
+    }
+    .rec-audio-wrap .btn-dl {
+      flex-shrink:0;
+    }
+</style>
 </head>
 <body>
 
@@ -290,6 +301,7 @@
                 <th id="colTranscriptHeader"><i class="bi bi-chat-text"></i> Transcript</th>
                 <th data-col="callbackBy">Called Back By <span class="sort-icon bi bi-arrow-down-up"></span></th>
                 <th data-col="callbackTime">Callback Time <span class="sort-icon bi bi-arrow-down-up"></span></th>
+                <th id="colRecordingHeader" style="width:90px;text-align:center"><i class="bi bi-play-circle"></i> Recording</th>
                 <th data-col="slaStatus" id="colSlaHeader">SLA <span class="sort-icon bi bi-arrow-down-up"></span></th>
               </tr>
             </thead>
@@ -1018,6 +1030,14 @@ function renderPage() {
         })() : ''}
       <td>${esc(vm.callbackBy) || '<span class="text-muted">—</span>'}</td>
       <td class="text-nowrap">${vm.callbackTime ? fmtDT(vm.callbackTime) : '<span class="text-muted">—</span>'}</td>
+      <td id="recCell_${vm.id}" style="text-align:center;white-space:nowrap">${vm.callbackRecordingId
+        ? `<button class="btn btn-sm btn-outline-primary py-0 px-1 rec-play-btn"
+               title="Play callback recording"
+               onclick="toggleRecording('${vm.id}','${vm.callbackRecordingId}',this)">
+             <i class="bi bi-play-circle-fill"></i>
+           </button>`
+        : '<span class="text-muted">—</span>'
+      }</td>
       ${slaEnabled ? `<td><span class="badge ${sla.badgeClass}">${sla.label}</span></td>` : ''}
     </tr>`;
   }).join('');
@@ -1123,6 +1143,49 @@ function toggleAutoRefresh() {
 // the server when RingCentral delivers a webhook notification.  The existing
 // 60-second polling remains active as a silent fallback.
 let sseSource = null;
+
+
+// ── Callback recording inline player ─────────────────────────────────────
+function toggleRecording(vmId, recordingId, btn) {
+  const cell = document.getElementById('recCell_' + vmId);
+  if (!cell) return;
+
+  // If player already exists, remove it (toggle off)
+  const existing = cell.querySelector('.rec-audio-wrap');
+  if (existing) {
+    existing.querySelector('audio').pause();
+    existing.remove();
+    btn.innerHTML = '<i class="bi bi-play-circle-fill"></i>';
+    btn.title = 'Play callback recording';
+    return;
+  }
+
+  // Build inline player
+  const wrap = document.createElement('div');
+  wrap.className = 'rec-audio-wrap';
+
+  const audio = document.createElement('audio');
+  audio.controls = true;
+  audio.autoplay = true;
+  audio.src = '/api/recording/' + recordingId + '/stream';
+  audio.addEventListener('error', () => {
+    wrap.innerHTML = '<span class="text-danger small">Unable to load recording</span>';
+  });
+
+  const dlBtn = document.createElement('a');
+  dlBtn.href = '/api/recording/' + recordingId + '/stream';
+  dlBtn.download = 'callback-recording.mp3';
+  dlBtn.className = 'btn btn-sm btn-outline-secondary py-0 px-1 btn-dl';
+  dlBtn.title = 'Download recording';
+  dlBtn.innerHTML = '<i class="bi bi-download"></i>';
+
+  wrap.appendChild(audio);
+  wrap.appendChild(dlBtn);
+  cell.appendChild(wrap);
+
+  btn.innerHTML = '<i class="bi bi-stop-circle-fill"></i>';
+  btn.title = 'Close player';
+}
 
 function connectSSE() {
   if (typeof EventSource === 'undefined') return; // browser doesn't support SSE

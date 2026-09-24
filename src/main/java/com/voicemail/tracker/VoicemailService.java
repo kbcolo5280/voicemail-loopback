@@ -469,6 +469,10 @@ public class VoicemailService {
                                 vm.setCallbackBy(call.from.phoneNumber);
                             }
                         }
+                        // Capture recording ID if this callback call was recorded
+                        if (call.recording != null && call.recording.id != null) {
+                            vm.setCallbackRecordingId(call.recording.id.toString());
+                        }
                         callIdx++;
                     }
 

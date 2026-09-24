@@ -58,6 +58,13 @@ public class VoicemailRecord {
      */
     private String transcriptAttachmentId;
 
+    /**
+     * RingCentral recording ID for the outbound callback call recording.
+     * Populated during callback enrichment if the call was recorded.
+     * Used by /api/recording/{id}/stream to proxy the audio with auth.
+     */
+    private String callbackRecordingId;
+
     // ----- Getters & Setters -----
 
     public String getId()                               { return id; }
@@ -101,4 +108,7 @@ public class VoicemailRecord {
 
     public String getTranscriptAttachmentId()           { return transcriptAttachmentId; }
     public void   setTranscriptAttachmentId(String v)   { this.transcriptAttachmentId = v; }
+
+    public String getCallbackRecordingId()               { return callbackRecordingId; }
+    public void   setCallbackRecordingId(String v)       { this.callbackRecordingId = v; }
 }
