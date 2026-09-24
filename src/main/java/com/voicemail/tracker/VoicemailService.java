@@ -32,6 +32,9 @@ public class VoicemailService {
     @Autowired
     private TokenStore tokenStore;
 
+    @Autowired
+    private RecordingStore recordingStore;
+
     // -----------------------------------------------------------------------
     // Thread pool
     // -----------------------------------------------------------------------
@@ -473,12 +476,18 @@ public class VoicemailService {
                         // CallLogRecordingInfo has no .id field — extract the ID
                         // from the trailing path segment of .uri:
                         //   https://.../restapi/v1.0/account/~/recording/{id}
+                        // Also register contentUri in RecordingStore so the proxy
+                        // can use the exact RC media URL (media.ringcentral.com).
                         if (call.recording != null && call.recording.uri != null
                                 && !call.recording.uri.isBlank()) {
                             String recUri = call.recording.uri;
                             String recId  = recUri.substring(recUri.lastIndexOf('/') + 1);
                             if (!recId.isBlank()) {
                                 vm.setCallbackRecordingId(recId);
+                                // Register the exact contentUri for streaming proxy
+                                if (call.recording.contentUri != null) {
+                                    recordingStore.register(recId, call.recording.contentUri);
+                                }
                             }
                         }
                         callIdx++;
