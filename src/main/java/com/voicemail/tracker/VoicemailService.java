@@ -402,108 +402,116 @@ public class VoicemailService {
     }
 
     // -----------------------------------------------------------------------
-    // Callback enrichment — parallelized by unique caller number
+    // Callback enrichment — single bulk call-log query, matched in memory
     // -----------------------------------------------------------------------
 
+    /**
+     * Enriches the given voicemail records with callback information.
+     *
+     * <p>Previous approach: one call-log query per unique caller number (parallel).
+     * Problem: RC's call-log endpoint is "heavy" (limit 10/60s per account), so
+     * blasting 50+ parallel queries triggers 429s for all but the first 10.
+     *
+     * <p>New approach: ONE broad outbound call-log query covering the entire date
+     * range, then index by phone number and match in memory.  Reduces API calls
+     * from O(unique-numbers) to O(totalOutboundCalls / 500) ≈ 1-3.
+     */
     public void enrichWithCallbacks(String sessionId, List<VoicemailRecord> records) throws Exception {
         if (records == null || records.isEmpty()) return;
 
-        Map<String, List<VoicemailRecord>> byNumber = new LinkedHashMap<>();
-        for (VoicemailRecord rec : records) {
-            if (rec.getCallerNumber() == null || rec.getDateTime() == null) continue;
-            String key = normalizeNumber(rec.getCallerNumber());
-            byNumber.computeIfAbsent(key, k -> new ArrayList<>()).add(rec);
+        // Find the earliest voicemail timestamp to use as dateFrom
+        String earliestDate = records.stream()
+                .map(VoicemailRecord::getDateTime)
+                .filter(d -> d != null && !d.isBlank())
+                .min(Comparator.naturalOrder())
+                .orElse(null);
+
+        if (earliestDate == null) return;
+
+        RestClient rc = getClient(sessionId);
+
+        // ── One broad query: all outbound voice calls since earliest voicemail ──
+        ReadCompanyCallLogParameters clParams = new ReadCompanyCallLogParameters();
+        clParams.direction = new String[]{"Outbound"};
+        clParams.type      = new String[]{"Voice"};
+        clParams.dateFrom  = earliestDate;
+        clParams.perPage   = 500L;
+
+        List<CallLogRecord> allCalls = new ArrayList<>();
+        long page = 1;
+        while (true) {
+            clParams.page = page;
+            var response = rc.restapi().account().callLog().list(clParams);
+            if (response == null || response.records == null
+                    || response.records.length == 0) break;
+            for (var r : response.records) allCalls.add(r);
+            if (response.records.length < 500) break;
+            page++;
         }
 
-        List<CompletableFuture<Void>> futures = new ArrayList<>();
+        System.out.println("[VoicemailService] Callback enrichment: fetched "
+                + allCalls.size() + " outbound calls in " + (page) + " page(s)");
 
-        for (Map.Entry<String, List<VoicemailRecord>> entry : byNumber.entrySet()) {
-            String number             = entry.getKey();
-            List<VoicemailRecord> vmGroup = entry.getValue();
-
-            futures.add(CompletableFuture.runAsync(() -> {
-                vmGroup.sort((a, b) -> {
-                    String da = a.getDateTime() != null ? a.getDateTime() : "";
-                    String db = b.getDateTime() != null ? b.getDateTime() : "";
-                    return da.compareTo(db);
-                });
-
-                try {
-                    RestClient rc = getClient(sessionId);
-
-                    ReadCompanyCallLogParameters clParams = new ReadCompanyCallLogParameters();
-                    clParams.direction   = new String[]{"Outbound"};
-                    clParams.type        = new String[]{"Voice"};
-                    clParams.phoneNumber = number;
-                    clParams.dateFrom    = vmGroup.get(0).getDateTime();
-                    clParams.perPage     = 100L;
-
-                    var clResponse = rc.restapi().account().callLog().list(clParams);
-
-                    if (clResponse == null || clResponse.records == null
-                            || clResponse.records.length == 0) return;
-
-                    Arrays.sort(clResponse.records, Comparator.comparing(c -> c.startTime));
-
-                    int callIdx = 0;
-                    for (int i = 0; i < vmGroup.size(); i++) {
-                        VoicemailRecord vm = vmGroup.get(i);
-                        String windowEnd = (i + 1 < vmGroup.size())
-                                ? vmGroup.get(i + 1).getDateTime() : null;
-
-                        while (callIdx < clResponse.records.length
-                                && clResponse.records[callIdx].startTime
-                                        .compareTo(vm.getDateTime()) <= 0) {
-                            callIdx++;
-                        }
-                        if (callIdx >= clResponse.records.length) break;
-
-                        var call = clResponse.records[callIdx];
-                        if (windowEnd != null && call.startTime.compareTo(windowEnd) >= 0) continue;
-
-                        vm.setCallbackTime(call.startTime);
-                        if (call.from != null) {
-                            String agentName = call.from.name;
-                            if (agentName != null && !agentName.isBlank()) {
-                                vm.setCallbackBy(agentName);
-                            } else if (call.from.extensionNumber != null) {
-                                vm.setCallbackBy("Ext. " + call.from.extensionNumber);
-                            } else {
-                                vm.setCallbackBy(call.from.phoneNumber);
-                            }
-                        }
-                        // Capture recording ID if this callback call was recorded.
-                        // CallLogRecordingInfo has no .id field — extract the ID
-                        // from the trailing path segment of .uri:
-                        //   https://.../restapi/v1.0/account/~/recording/{id}
-                        // Also register contentUri in RecordingStore so the proxy
-                        // can use the exact RC media URL (media.ringcentral.com).
-                        if (call.recording != null && call.recording.uri != null
-                                && !call.recording.uri.isBlank()) {
-                            String recUri = call.recording.uri;
-                            String recId  = recUri.substring(recUri.lastIndexOf('/') + 1);
-                            if (!recId.isBlank()) {
-                                vm.setCallbackRecordingId(recId);
-                                // Register the exact contentUri for streaming proxy
-                                if (call.recording.contentUri != null) {
-                                    recordingStore.register(recId, call.recording.contentUri);
-                                }
-                            }
-                        }
-                        callIdx++;
-                    }
-
-                } catch (Exception e) {
-                    System.err.println("[VoicemailService] Callback lookup failed for "
-                            + number + ": " + e.getMessage());
+        // ── Register recordings from every outbound call ──
+        for (CallLogRecord call : allCalls) {
+            if (call.recording != null && call.recording.uri != null
+                    && !call.recording.uri.isBlank()
+                    && call.recording.contentUri != null) {
+                String recUri = call.recording.uri;
+                String recId  = recUri.substring(recUri.lastIndexOf('/') + 1);
+                if (!recId.isBlank()) {
+                    recordingStore.register(recId, call.recording.contentUri);
                 }
-            }, POOL));
+            }
         }
 
-        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).get();
+        // ── Index outbound calls by normalized destination number, sorted by time ──
+        Map<String, List<CallLogRecord>> callsByNumber = new java.util.HashMap<>();
+        for (CallLogRecord call : allCalls) {
+            if (call.to != null && call.to.phoneNumber != null) {
+                String num = normalizeNumber(call.to.phoneNumber);
+                callsByNumber.computeIfAbsent(num, k -> new ArrayList<>()).add(call);
+            }
+        }
+        // Sort each bucket ascending by startTime
+        callsByNumber.values().forEach(list ->
+                list.sort(Comparator.comparing(c -> c.startTime)));
+
+        // ── Match each voicemail to first outbound call to that number after VM ──
+        for (VoicemailRecord vm : records) {
+            if (vm.getCallerNumber() == null || vm.getDateTime() == null) continue;
+            String num = normalizeNumber(vm.getCallerNumber());
+            List<CallLogRecord> calls = callsByNumber.get(num);
+            if (calls == null || calls.isEmpty()) continue;
+
+            for (CallLogRecord call : calls) {
+                if (call.startTime == null) continue;
+                if (call.startTime.compareTo(vm.getDateTime()) <= 0) continue; // must be after VM
+
+                vm.setCallbackTime(call.startTime);
+                if (call.from != null) {
+                    String name = call.from.name;
+                    if (name != null && !name.isBlank()) {
+                        vm.setCallbackBy(name);
+                    } else if (call.from.extensionNumber != null) {
+                        vm.setCallbackBy("Ext. " + call.from.extensionNumber);
+                    } else {
+                        vm.setCallbackBy(call.from.phoneNumber);
+                    }
+                }
+                if (call.recording != null && call.recording.uri != null
+                        && !call.recording.uri.isBlank()) {
+                    String recUri = call.recording.uri;
+                    String recId  = recUri.substring(recUri.lastIndexOf('/') + 1);
+                    if (!recId.isBlank()) vm.setCallbackRecordingId(recId);
+                }
+                break; // first match wins
+            }
+        }
     }
 
     // -----------------------------------------------------------------------
+    // Transcript enrichment    // -----------------------------------------------------------------------
     // Transcript enrichment — parallelized, lazy
     // -----------------------------------------------------------------------
 

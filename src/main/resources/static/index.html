@@ -375,6 +375,8 @@ let showTranscript  = true;      // whether Transcript column is visible
 let transcriptsLoaded = false;   // true once enrichWithTranscripts has run for current allRecords
 let loadGeneration    = 0;         // incremented on each loadVoicemails() call; guards background enrichment
 let enrichmentCache   = {};       // keyed by message id; persists across refreshes to avoid re-fetching RC data
+let lastSseRefresh    = 0;        // timestamp of last SSE-triggered reload (throttle guard)
+let lastCallbackCheck = 0;        // timestamp of last enrichment run (2-min cooldown)
 
 // ── Init ────────────────────────────────────────────────────────────────────
 (async function init() {
@@ -625,11 +627,20 @@ function getSlaStatus(vm) {
  */
 async function enrichCallbacksBackground(gen) {
   if (allRecords.length === 0) return;
+
+  // Only re-run if there are unchecked records AND 2 minutes have passed
+  const unchecked = allRecords.filter(
+    r => r.callerNumber && r.dateTime && !(enrichmentCache[r.id] && enrichmentCache[r.id].callbackChecked)
+  );
+  if (unchecked.length === 0) return;
+  const now = Date.now();
+  if (now - lastCallbackCheck < 120_000) return; // 2-minute cooldown
+  lastCallbackCheck = now;
+
   const badge = document.getElementById('callbackLoadingBadge');
   if (badge) badge.classList.remove('hidden');
   try {
-    const items = allRecords
-      .filter(r => r.callerNumber && r.dateTime && !(enrichmentCache[r.id] && enrichmentCache[r.id].callbackChecked))
+    const items = unchecked
       .map(r => ({ id: r.id, callerNumber: r.callerNumber, dateTime: r.dateTime }));
 
     if (items.length === 0) return;
@@ -1200,6 +1211,12 @@ function connectSSE() {
   sseSource = new EventSource('/api/sse');
 
   sseSource.addEventListener('voicemail-update', () => {
+    const now = Date.now();
+    if (now - lastSseRefresh < 10_000) {
+      console.log('[SSE] Voicemail update received — skipped (too soon after last refresh)');
+      return;
+    }
+    lastSseRefresh = now;
     console.log('[SSE] Voicemail update received — refreshing');
     loadVoicemails();
   });
