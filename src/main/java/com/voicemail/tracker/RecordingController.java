@@ -5,7 +5,6 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 
 import jakarta.servlet.http.HttpSession;
 import java.io.InputStream;
@@ -17,13 +16,8 @@ import java.net.http.HttpResponse;
 /**
  * Proxies RingCentral call recording audio to the browser via streaming.
  *
- * RC recording content is hosted on media.ringcentral.com and requires a
- * Bearer token — the browser cannot call it directly. This endpoint:
- *  1. Looks up the exact contentUri (registered by VoicemailService during
- *     callback enrichment) from RecordingStore.
- *  2. Opens an authenticated HTTP connection to RC and pipes the audio
- *     InputStream directly to the response — no byte[] buffering, so
- *     large recordings don't consume heap.
+ * RC recording content requires a Bearer token — the browser cannot call it
+ * directly. This endpoint fetches from RC and streams bytes to the browser.
  *
  * GET /api/recording/{recordingId}/stream
  */
@@ -37,8 +31,11 @@ public class RecordingController {
     @Autowired
     private RecordingStore recordingStore;
 
+    @Autowired
+    private RingCentralConfig config;
+
     private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
-            .followRedirects(HttpClient.Redirect.ALWAYS)   // RC media URLs often redirect
+            .followRedirects(HttpClient.Redirect.ALWAYS)
             .build();
 
     @GetMapping("/{recordingId}/stream")
@@ -46,32 +43,37 @@ public class RecordingController {
             @PathVariable String recordingId,
             HttpSession session) {
 
-        // --- Auth check ---
+        // Auth check
         String sessionId = session.getId();
         TokenStore.Entry entry = tokenStore.get(sessionId);
         if (entry == null || entry.token == null || entry.token.access_token == null) {
             return ResponseEntity.status(401).build();
         }
-
-        // --- Look up the exact RC contentUri ---
-        String contentUri = recordingStore.getContentUri(recordingId);
-        if (contentUri == null || contentUri.isBlank()) {
-            // ContentUri not yet registered (page loaded before enrichment ran
-            // or container restarted). Tell browser to retry after a refresh.
-            System.err.println("[RecordingController] contentUri not registered for id="
-                    + recordingId + " — user should refresh the page");
-            return ResponseEntity.status(404)
-                    .header("X-Recording-Error", "not-registered")
-                    .build();
-        }
-
         String accessToken = entry.token.access_token;
 
-        // --- Stream the audio from RC ---
+        // Resolve content URL — prefer the exact contentUri from RC (correct host),
+        // fall back to constructing from the server URL if not yet registered.
+        String contentUri = recordingStore.getContentUri(recordingId);
+        if (contentUri == null || contentUri.isBlank()) {
+            // Fallback: try media.ringcentral.com directly
+            // (RC always serves recording content from the media subdomain)
+            String serverUrl = config.getServerUrl();
+            String mediaBase = serverUrl.contains("devtest")
+                    ? "https://media.devtest.ringcentral.com"
+                    : "https://media.ringcentral.com";
+            contentUri = mediaBase + "/restapi/v1.0/account/~/recording/" + recordingId + "/content";
+            System.out.println("[RecordingController] contentUri not registered, using fallback: " + contentUri);
+        } else {
+            System.out.println("[RecordingController] streaming recording " + recordingId
+                    + " from: " + contentUri);
+        }
+
+        final String finalContentUri = contentUri;
+
         StreamingResponseBody body = outputStream -> {
             try {
                 HttpRequest request = HttpRequest.newBuilder()
-                        .uri(URI.create(contentUri))
+                        .uri(URI.create(finalContentUri))
                         .header("Authorization", "Bearer " + accessToken)
                         .header("Accept", "audio/mpeg, audio/wav, audio/*, */*")
                         .GET()
@@ -80,9 +82,17 @@ public class RecordingController {
                 HttpResponse<InputStream> rcResponse = HTTP_CLIENT.send(
                         request, HttpResponse.BodyHandlers.ofInputStream());
 
-                if (rcResponse.statusCode() != 200) {
-                    System.err.println("[RecordingController] RC returned "
-                            + rcResponse.statusCode() + " for recording " + recordingId);
+                int status = rcResponse.statusCode();
+                System.out.println("[RecordingController] RC responded " + status
+                        + " for recording " + recordingId);
+
+                if (status != 200) {
+                    // Read error body for logging
+                    try (InputStream err = rcResponse.body()) {
+                        byte[] errBytes = err.readAllBytes();
+                        System.err.println("[RecordingController] RC error body: "
+                                + new String(errBytes));
+                    }
                     return;
                 }
 
@@ -104,7 +114,7 @@ public class RecordingController {
                 .header(HttpHeaders.CONTENT_TYPE, "audio/mpeg")
                 .header(HttpHeaders.CONTENT_DISPOSITION,
                         "inline; filename=\"callback-recording-" + recordingId + ".mp3\"")
-                .header("X-Accel-Buffering", "no")   // disable nginx buffering on Railway
+                .header("X-Accel-Buffering", "no")
                 .header("Cache-Control", "no-store")
                 .body(body);
     }

@@ -9,10 +9,8 @@ import java.nio.charset.StandardCharsets;
 import java.time.*;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -54,24 +52,32 @@ public class VoicemailService {
     private final ConcurrentHashMap<String, Object> sessionLocks = new ConcurrentHashMap<>();
 
     /**
-     * Per-session cache for the extensions list, which rarely changes and is
-     * fetched on every page load (both from /api/extensions and internally
-     * inside the aggregate voicemail endpoints).  A 5-minute TTL is safe for
-     * almost all use-cases while still picking up newly added extensions.
+     * Application-level cache for the extensions list.  Keyed at the app level
+     * (not per session) because extensions are account-wide and shared across
+     * all logged-in users.  Using a per-session cache meant every new HTTP
+     * session (page reload, new tab, 401-triggered reload) caused a cold RC
+     * API call, which produced 429 storms during active testing.
+     *
+     * TTL is 1 hour — extensions change very rarely (staff additions) and a
+     * stale list for up to 60 minutes is acceptable.
      */
-    private static final long EXTENSIONS_CACHE_TTL_MS = 5 * 60 * 1_000L;
-
-    private final ConcurrentHashMap<String, List<ExtensionRecord>> extensionsCache    = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, Long>                  extensionsCacheAge = new ConcurrentHashMap<>();
+    private static final long               EXTENSIONS_CACHE_TTL_MS = 60 * 60 * 1_000L;
+    private volatile List<ExtensionRecord>  extensionsCacheData      = null;
+    private volatile long                   extensionsCacheAge       = 0L;
 
     /**
-     * Evicts all session-specific state (token-refresh lock, extensions cache)
-     * for the given session.  Called on logout so memory is reclaimed promptly.
+     * Evicts session-specific state (token-refresh lock) for the given session.
+     * Called on logout so memory is reclaimed promptly.
+     * Extensions cache is application-level and intentionally not cleared here.
      */
     public void clearSessionCache(String sessionId) {
         sessionLocks.remove(sessionId);
-        extensionsCache.remove(sessionId);
-        extensionsCacheAge.remove(sessionId);
+    }
+
+    /** Force-clears the application-level extensions cache (e.g. after adding a new user). */
+    public void clearExtensionsCache() {
+        extensionsCacheData = null;
+        extensionsCacheAge  = 0L;
     }
 
     // -----------------------------------------------------------------------
@@ -357,26 +363,28 @@ public class VoicemailService {
     /**
      * Returns the list of User and Department extensions for this account.
      *
-     * <p>Results are cached per session for {@value #EXTENSIONS_CACHE_TTL_MS} ms
+     * <p>Results are cached at the application level for {@value #EXTENSIONS_CACHE_TTL_MS} ms
      * (5 minutes).  This eliminates the duplicate RC API call that previously
      * occurred on every page load: once from the frontend hitting
      * {@code /api/extensions} and once from inside the aggregate voicemail
      * endpoints.
      */
     public List<ExtensionRecord> fetchExtensions(String sessionId) throws Exception {
-        // Serve from cache if still fresh
-        Long cacheAge = extensionsCacheAge.get(sessionId);
-        if (cacheAge != null
-                && System.currentTimeMillis() - cacheAge < EXTENSIONS_CACHE_TTL_MS) {
-            List<ExtensionRecord> cached = extensionsCache.get(sessionId);
-            if (cached != null) return cached;
+        // Serve from application-level cache if still fresh (1-hour TTL).
+        // Cache is shared across all sessions — extensions are account-wide and
+        // change very rarely, so a single app-level copy is safe and eliminates
+        // the 429 storm that occurred when per-session caches all started cold.
+        List<ExtensionRecord> cached = extensionsCacheData;
+        if (cached != null
+                && System.currentTimeMillis() - extensionsCacheAge < EXTENSIONS_CACHE_TTL_MS) {
+            return cached;
         }
 
         // Cache miss — fetch from RC
         RestClient rc = getClient(sessionId);
 
         ListExtensionsParameters params = new ListExtensionsParameters();
-        params.perPage = 1000L;              // was 200 — avoids pagination for large accounts
+        params.perPage = 1000L;              // avoids pagination for large accounts
 
         var response = rc.restapi().account().extension().list(params);
 
@@ -394,9 +402,9 @@ public class VoicemailService {
             }
         }
 
-        // Store in cache
-        extensionsCache.put(sessionId, extensions);
-        extensionsCacheAge.put(sessionId, System.currentTimeMillis());
+        // Store in application-level cache
+        extensionsCacheData = extensions;
+        extensionsCacheAge  = System.currentTimeMillis();
 
         return extensions;
     }
@@ -421,7 +429,7 @@ public class VoicemailService {
 
         // Find the earliest voicemail timestamp to use as dateFrom
         String earliestDate = records.stream()
-                .map(VoicemailRecord::getDateTime)
+                .map(r -> r.getDateTime())
                 .filter(d -> d != null && !d.isBlank())
                 .min(Comparator.naturalOrder())
                 .orElse(null);
@@ -478,13 +486,22 @@ public class VoicemailService {
                 list.sort(Comparator.comparing(c -> c.startTime)));
 
         // ── Match each voicemail to first outbound call to that number after VM ──
-        for (VoicemailRecord vm : records) {
+        // Process newest voicemails first so the most-recent message gets the callback credit.
+        // Each outbound call is consumed (removed from the bucket) once matched, so a single
+        // callback event cannot satisfy multiple voicemails from the same caller.
+        List<VoicemailRecord> sorted = new ArrayList<>(records);
+        sorted.sort(Comparator.comparing(r -> r.getDateTime(),
+                Comparator.nullsLast(Comparator.reverseOrder())));
+
+        for (VoicemailRecord vm : sorted) {
             if (vm.getCallerNumber() == null || vm.getDateTime() == null) continue;
             String num = normalizeNumber(vm.getCallerNumber());
             List<CallLogRecord> calls = callsByNumber.get(num);
             if (calls == null || calls.isEmpty()) continue;
 
-            for (CallLogRecord call : calls) {
+            java.util.Iterator<CallLogRecord> it = calls.iterator();
+            while (it.hasNext()) {
+                CallLogRecord call = it.next();
                 if (call.startTime == null) continue;
                 if (call.startTime.compareTo(vm.getDateTime()) <= 0) continue; // must be after VM
 
@@ -505,7 +522,8 @@ public class VoicemailService {
                     String recId  = recUri.substring(recUri.lastIndexOf('/') + 1);
                     if (!recId.isBlank()) vm.setCallbackRecordingId(recId);
                 }
-                break; // first match wins
+                it.remove(); // consume this call — can't match another voicemail
+                break; // matched, move on to next voicemail
             }
         }
     }

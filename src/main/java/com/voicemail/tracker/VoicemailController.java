@@ -215,6 +215,22 @@ public class VoicemailController {
         }
     }
 
+    /** Force-clears the app-level extensions cache and returns a fresh list.
+     *  Use after adding/removing RC users so the dashboard reflects the change
+     *  without waiting for the 1-hour TTL to expire. */
+    @PostMapping("/extensions/refresh")
+    public ResponseEntity<?> refreshExtensions(HttpSession session) {
+        try {
+            voicemailService.clearExtensionsCache();
+            List<ExtensionRecord> extensions = voicemailService.fetchExtensions(session.getId());
+            return ResponseEntity.ok(extensions);
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(401).body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Current user
     // -----------------------------------------------------------------------
