@@ -78,4 +78,21 @@ public class TokenStore {
     public void remove(String sessionId) {
         store.remove(sessionId);
     }
+
+    /**
+     * Returns any session ID that currently holds a non-expired token, or
+     * {@code null} if no active sessions exist.
+     *
+     * Used by {@link SubscriptionScheduler} to borrow an active RC session
+     * for scheduled report API calls, which have no associated HTTP request.
+     */
+    public String getAnyActiveSessionId() {
+        long now = System.currentTimeMillis();
+        for (java.util.Map.Entry<String, Entry> entry : store.entrySet()) {
+            if (entry.getValue().expiresAtMs > now) {
+                return entry.getKey();
+            }
+        }
+        return null;
+    }
 }

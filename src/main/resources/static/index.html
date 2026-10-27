@@ -99,6 +99,58 @@
     .rec-audio-wrap .btn-dl {
       flex-shrink:0;
     }
+
+    /* ── Email / Subscription modals ─────────────────────────────────────── */
+    .em-modal-backdrop {
+      position:fixed; inset:0; background:rgba(0,0,0,.45);
+      display:flex; align-items:center; justify-content:center;
+      z-index:10000; padding:16px;
+    }
+    .em-modal {
+      background:#fff; border-radius:10px; box-shadow:0 20px 60px rgba(0,0,0,.3);
+      width:100%; max-width:520px; max-height:92vh; display:flex; flex-direction:column;
+      overflow:hidden;
+    }
+    .em-modal.wide { max-width:680px; }
+    .em-modal-header {
+      padding:16px 20px; border-bottom:1px solid #e5e7eb;
+      display:flex; align-items:center; justify-content:space-between; flex-shrink:0;
+    }
+    .em-modal-header h5 { margin:0; font-size:1rem; font-weight:600; }
+    .em-modal-body { padding:20px; overflow-y:auto; flex:1; }
+    .em-modal-footer {
+      padding:12px 20px; border-top:1px solid #e5e7eb;
+      display:flex; justify-content:flex-end; gap:8px; flex-shrink:0;
+    }
+    .em-close { background:none; border:none; font-size:1.25rem; cursor:pointer; color:#6b7280; line-height:1; padding:0; }
+    .em-close:hover { color:#111; }
+    .smtp-status-card {
+      border:1px solid #e5e7eb; border-radius:8px; padding:14px 16px;
+      display:flex; align-items:center; gap:12px;
+    }
+    .smtp-status-dot {
+      width:12px; height:12px; border-radius:50%; flex-shrink:0;
+    }
+    .smtp-status-dot.green { background:#16a34a; box-shadow:0 0 0 3px #dcfce7; }
+    .smtp-status-dot.red   { background:#dc2626; box-shadow:0 0 0 3px #fee2e2; }
+    .smtp-status-dot.gray  { background:#9ca3af; box-shadow:0 0 0 3px #f3f4f6; }
+    .sub-row {
+      border:1px solid #e5e7eb; border-radius:8px; padding:12px 14px; margin-bottom:10px;
+      display:flex; align-items:center; gap:10px;
+    }
+    .sub-row-info { flex:1; min-width:0; }
+    .sub-row-name { font-weight:600; font-size:.9rem; margin-bottom:2px; }
+    .sub-row-meta { font-size:.78rem; color:#6b7280; }
+    .sub-add-btn {
+      border:2px dashed #d1d5db; border-radius:8px; padding:12px;
+      text-align:center; color:#6b7280; cursor:pointer; font-size:.9rem;
+      transition:border-color .15s, color .15s;
+    }
+    .sub-add-btn:hover { border-color:#6366f1; color:#6366f1; }
+    .em-form-row { margin-bottom:14px; }
+    .em-form-row label { display:block; font-size:.82rem; font-weight:500; color:#374151; margin-bottom:4px; }
+    .em-form-row input, .em-form-row select { width:100%; }
+    .em-form-row .hint { font-size:.75rem; color:#9ca3af; margin-top:3px; }
 </style>
 </head>
 <body>
@@ -125,6 +177,9 @@
     </span>
     <button class="btn btn-sm btn-outline-light" id="btnToggleRefresh">
       <i class="bi bi-arrow-repeat"></i> Auto-refresh
+    </button>
+    <button class="btn btn-sm btn-outline-light" onclick="openSmtpModal()" title="Email Reports &amp; Subscriptions">
+      <i class="bi bi-envelope"></i> Email Reports
     </button>
     <button class="btn btn-sm btn-outline-light" onclick="location='/oauth/logout'">
       <i class="bi bi-box-arrow-right"></i> Logout
@@ -343,6 +398,179 @@
   <div class="text-center">
     <div class="spinner-border text-primary" style="width:3rem;height:3rem;"></div>
     <p class="mt-2 fw-semibold text-muted" id="loadingMsg">Fetching voicemails…</p>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     EMAIL / SUBSCRIPTION MODALS
+══════════════════════════════════════════════ -->
+
+<!-- Modal 1: SMTP Status -->
+<div id="smtpModal" class="em-modal-backdrop" style="display:none;" onclick="if(event.target===this)closeEmModal('smtpModal')">
+  <div class="em-modal">
+    <div class="em-modal-header">
+      <h5><i class="bi bi-envelope-check me-2 text-primary"></i>Email Reports</h5>
+      <button class="em-close" onclick="closeEmModal('smtpModal')">&times;</button>
+    </div>
+    <div class="em-modal-body" id="smtpModalBody">
+      <!-- filled by openSmtpModal() -->
+    </div>
+    <div class="em-modal-footer" id="smtpModalFooter">
+      <!-- filled by openSmtpModal() -->
+    </div>
+  </div>
+</div>
+
+<!-- Modal 2: SMTP Settings form -->
+<div id="smtpSettingsModal" class="em-modal-backdrop" style="display:none;" onclick="if(event.target===this)closeEmModal('smtpSettingsModal')">
+  <div class="em-modal">
+    <div class="em-modal-header">
+      <h5><i class="bi bi-gear me-2 text-primary"></i>SMTP Settings</h5>
+      <button class="em-close" onclick="closeEmModal('smtpSettingsModal')">&times;</button>
+    </div>
+    <div class="em-modal-body">
+      <div class="em-form-row">
+        <label>SMTP Host</label>
+        <input id="smtpHost" class="form-control form-control-sm" placeholder="smtp.office365.com" />
+      </div>
+      <div class="d-flex gap-2">
+        <div class="em-form-row" style="flex:1">
+          <label>Port</label>
+          <input id="smtpPort" type="number" class="form-control form-control-sm" value="587" />
+        </div>
+        <div class="em-form-row" style="flex:2">
+          <label>Encryption</label>
+          <select id="smtpEncryption" class="form-select form-select-sm">
+            <option value="STARTTLS">STARTTLS (recommended)</option>
+            <option value="SSL">SSL</option>
+            <option value="NONE">None</option>
+          </select>
+        </div>
+      </div>
+      <div class="em-form-row">
+        <label>Username / Email</label>
+        <input id="smtpUsername" class="form-control form-control-sm" placeholder="reports@yourcompany.com" />
+      </div>
+      <div class="em-form-row">
+        <label>Password / App Password</label>
+        <input id="smtpPassword" type="password" class="form-control form-control-sm" placeholder="Leave blank to keep existing" />
+        <div class="hint">For Microsoft 365, use an App Password or OAuth token. For Gmail, use an App Password.</div>
+      </div>
+      <div class="em-form-row">
+        <label>From Name</label>
+        <input id="smtpFromName" class="form-control form-control-sm" placeholder="Voicemail Tracker" />
+      </div>
+      <div class="em-form-row">
+        <label>From Email <span class="text-muted fw-normal">(optional — defaults to username)</span></label>
+        <input id="smtpFromEmail" class="form-control form-control-sm" placeholder="reports@yourcompany.com" />
+      </div>
+      <div id="smtpTestResult" class="alert alert-sm mt-2" style="display:none;font-size:.82rem;padding:8px 12px;"></div>
+    </div>
+    <div class="em-modal-footer">
+      <div class="me-auto d-flex align-items-center gap-2">
+        <input id="smtpTestEmail" class="form-control form-control-sm" placeholder="Test recipient email" style="width:200px;" />
+        <button class="btn btn-sm btn-outline-secondary" onclick="testSmtp()">Send Test</button>
+      </div>
+      <button class="btn btn-sm btn-secondary" onclick="closeEmModal('smtpSettingsModal')">Cancel</button>
+      <button class="btn btn-sm btn-primary" onclick="saveSmtp()">Save Settings</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal 3: Subscriptions list -->
+<div id="subModal" class="em-modal-backdrop" style="display:none;" onclick="if(event.target===this)closeEmModal('subModal')">
+  <div class="em-modal wide">
+    <div class="em-modal-header">
+      <h5><i class="bi bi-send me-2 text-primary"></i>Scheduled Reports</h5>
+      <button class="em-close" onclick="closeEmModal('subModal')">&times;</button>
+    </div>
+    <div class="em-modal-body" id="subListBody">
+      <!-- filled by openSubModal() -->
+    </div>
+    <div class="em-modal-footer">
+      <button class="btn btn-sm btn-secondary" onclick="closeEmModal('subModal')">Close</button>
+      <button class="btn btn-sm btn-primary" onclick="openSubEdit(null)"><i class="bi bi-plus-lg me-1"></i>New Subscription</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal 4: Add / Edit subscription -->
+<div id="subEditModal" class="em-modal-backdrop" style="display:none;" onclick="if(event.target===this)closeEmModal('subEditModal')">
+  <div class="em-modal wide">
+    <div class="em-modal-header">
+      <h5 id="subEditTitle"><i class="bi bi-plus-circle me-2 text-primary"></i>New Subscription</h5>
+      <button class="em-close" onclick="closeEmModal('subEditModal')">&times;</button>
+    </div>
+    <div class="em-modal-body">
+      <div class="em-form-row">
+        <label>Subscription Name</label>
+        <input id="subName" class="form-control form-control-sm" placeholder="e.g. Daily Queue Summary" />
+      </div>
+      <div class="em-form-row">
+        <label>Recipients <span class="text-muted fw-normal">(comma-separated emails)</span></label>
+        <input id="subRecipients" class="form-control form-control-sm" placeholder="manager@company.com, owner@company.com" />
+      </div>
+      <div class="d-flex gap-2">
+        <div class="em-form-row" style="flex:1">
+          <label>Schedule</label>
+          <select id="subSchedule" class="form-select form-select-sm" onchange="toggleWeeklyDay()">
+            <option value="DAILY">Daily</option>
+            <option value="WEEKLY">Weekly</option>
+          </select>
+        </div>
+        <div class="em-form-row" id="subDayRow" style="flex:1;display:none;">
+          <label>Day of Week</label>
+          <select id="subDay" class="form-select form-select-sm">
+            <option value="MON">Monday</option>
+            <option value="TUE">Tuesday</option>
+            <option value="WED">Wednesday</option>
+            <option value="THU">Thursday</option>
+            <option value="FRI">Friday</option>
+            <option value="SAT">Saturday</option>
+            <option value="SUN">Sunday</option>
+          </select>
+        </div>
+        <div class="em-form-row" style="flex:1">
+          <label>Send Time (24h)</label>
+          <input id="subTime" type="time" class="form-control form-control-sm" value="08:00" />
+        </div>
+      </div>
+      <div class="d-flex gap-2">
+        <div class="em-form-row" style="flex:1">
+          <label>View</label>
+          <select id="subViewMode" class="form-select form-select-sm">
+            <option value="queues">Call Queues</option>
+            <option value="user">User Extensions</option>
+            <option value="both">Both</option>
+          </select>
+        </div>
+        <div class="em-form-row" style="flex:1">
+          <label>Period</label>
+          <select id="subPeriod" class="form-select form-select-sm">
+            <option value="7d">Last 7 Days</option>
+            <option value="30d" selected>Last 30 Days</option>
+            <option value="60d">Last 60 Days</option>
+            <option value="90d">Last 90 Days</option>
+          </select>
+        </div>
+        <div class="em-form-row" style="flex:1">
+          <label>Format</label>
+          <select id="subFormat" class="form-select form-select-sm">
+            <option value="CSV">CSV Attachment</option>
+            <option value="HTML">HTML Email Only</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-check mt-1">
+        <input class="form-check-input" type="checkbox" id="subEnabled" checked />
+        <label class="form-check-label small" for="subEnabled">Active (subscription will send on schedule)</label>
+      </div>
+      <div id="subEditMsg" class="alert alert-sm mt-3" style="display:none;font-size:.82rem;padding:8px 12px;"></div>
+    </div>
+    <div class="em-modal-footer">
+      <button class="btn btn-sm btn-secondary" onclick="closeEmModal('subEditModal')">Cancel</button>
+      <button class="btn btn-sm btn-primary" onclick="saveSubEdit()">Save Subscription</button>
+    </div>
   </div>
 </div>
 
@@ -1274,6 +1502,333 @@ function fmtDT(iso) {
       hour: 'numeric', minute: '2-digit'
     });
   } catch { return iso; }
+}
+
+// ── Email / Subscription Modal Functions ─────────────────────────────────────
+
+let _subEditId = null; // null = new, string = editing existing
+
+function openEmModal(id) {
+  document.getElementById(id).style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+function closeEmModal(id) {
+  document.getElementById(id).style.display = 'none';
+  // Restore scroll only if no other modal is open
+  const anyOpen = ['smtpModal','smtpSettingsModal','subModal','subEditModal']
+    .some(mid => document.getElementById(mid).style.display !== 'none');
+  if (!anyOpen) document.body.style.overflow = '';
+}
+
+// ── SMTP Status modal ─────────────────────────────────────────────────────────
+
+async function openSmtpModal() {
+  const body   = document.getElementById('smtpModalBody');
+  const footer = document.getElementById('smtpModalFooter');
+  body.innerHTML   = '<div class="text-center text-muted py-3"><div class="spinner-border spinner-border-sm"></div></div>';
+  footer.innerHTML = '';
+  openEmModal('smtpModal');
+
+  let cfg = {};
+  try { cfg = await fetch('/api/smtp/config').then(r => r.json()); } catch(e) {}
+
+  if (cfg.configured) {
+    body.innerHTML = `
+      <div class="smtp-status-card mb-3">
+        <div class="smtp-status-dot green"></div>
+        <div>
+          <div style="font-weight:600;font-size:.9rem;">SMTP Configured</div>
+          <div style="font-size:.8rem;color:#6b7280;margin-top:2px;">
+            ${esc(cfg.host)}:${cfg.port} &nbsp;·&nbsp; ${esc(cfg.encryption)}
+            &nbsp;·&nbsp; ${esc(cfg.username)}
+          </div>
+        </div>
+        <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="openSmtpSettings()">
+          <i class="bi bi-pencil"></i> Edit
+        </button>
+      </div>
+      <p class="text-muted small mb-0">
+        Emails are sent from your own environment using the SMTP settings above.
+        Use <strong>Scheduled Reports</strong> below to configure automated delivery.
+      </p>`;
+    footer.innerHTML = `
+      <button class="btn btn-sm btn-secondary" onclick="closeEmModal('smtpModal')">Close</button>
+      <button class="btn btn-sm btn-primary" onclick="closeEmModal('smtpModal');openSubModal()">
+        <i class="bi bi-send me-1"></i>Manage Subscriptions →
+      </button>`;
+  } else {
+    body.innerHTML = `
+      <div class="smtp-status-card mb-3">
+        <div class="smtp-status-dot gray"></div>
+        <div>
+          <div style="font-weight:600;font-size:.9rem;">No Email Server Configured</div>
+          <div style="font-size:.8rem;color:#6b7280;margin-top:2px;">
+            Configure your SMTP settings to enable scheduled voicemail reports.
+          </div>
+        </div>
+      </div>
+      <div class="alert alert-info small mb-0" style="font-size:.82rem;">
+        <strong>Works with any email provider:</strong> Microsoft 365, Gmail, or any custom SMTP server.
+        Emails are sent from your own domain — no Anthropic or third-party relay.
+      </div>`;
+    footer.innerHTML = `
+      <button class="btn btn-sm btn-secondary" onclick="closeEmModal('smtpModal')">Close</button>
+      <button class="btn btn-sm btn-primary" onclick="openSmtpSettings()">
+        <i class="bi bi-gear me-1"></i>Configure SMTP →
+      </button>`;
+  }
+}
+
+// ── SMTP Settings modal ───────────────────────────────────────────────────────
+
+async function openSmtpSettings() {
+  // Pre-fill with existing config
+  let cfg = {};
+  try { cfg = await fetch('/api/smtp/config').then(r => r.json()); } catch(e) {}
+
+  document.getElementById('smtpHost').value       = cfg.host       || '';
+  document.getElementById('smtpPort').value       = cfg.port       || 587;
+  document.getElementById('smtpEncryption').value = cfg.encryption || 'STARTTLS';
+  document.getElementById('smtpUsername').value   = cfg.username   || '';
+  document.getElementById('smtpPassword').value   = ''; // never pre-fill passwords
+  document.getElementById('smtpFromName').value   = cfg.fromName   || 'Voicemail Tracker';
+  document.getElementById('smtpFromEmail').value  = cfg.fromEmail  || '';
+  document.getElementById('smtpTestEmail').value  = cfg.username   || '';
+
+  const res = document.getElementById('smtpTestResult');
+  res.style.display = 'none';
+
+  openEmModal('smtpSettingsModal');
+}
+
+async function saveSmtp() {
+  const payload = {
+    host:       document.getElementById('smtpHost').value.trim(),
+    port:       parseInt(document.getElementById('smtpPort').value) || 587,
+    encryption: document.getElementById('smtpEncryption').value,
+    username:   document.getElementById('smtpUsername').value.trim(),
+    password:   document.getElementById('smtpPassword').value,
+    fromName:   document.getElementById('smtpFromName').value.trim(),
+    fromEmail:  document.getElementById('smtpFromEmail').value.trim()
+  };
+  try {
+    await fetch('/api/smtp/config', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    closeEmModal('smtpSettingsModal');
+    openSmtpModal(); // refresh status
+  } catch(e) {
+    alert('Save failed: ' + e.message);
+  }
+}
+
+async function testSmtp() {
+  const email = document.getElementById('smtpTestEmail').value.trim();
+  const res   = document.getElementById('smtpTestResult');
+  res.style.display = 'block';
+  res.className = 'alert alert-info mt-2';
+  res.style.fontSize = '.82rem';
+  res.style.padding = '8px 12px';
+  res.textContent = 'Sending test email…';
+
+  // Save current form values first (without password wipe guard)
+  const payload = {
+    host:       document.getElementById('smtpHost').value.trim(),
+    port:       parseInt(document.getElementById('smtpPort').value) || 587,
+    encryption: document.getElementById('smtpEncryption').value,
+    username:   document.getElementById('smtpUsername').value.trim(),
+    password:   document.getElementById('smtpPassword').value,
+    fromName:   document.getElementById('smtpFromName').value.trim(),
+    fromEmail:  document.getElementById('smtpFromEmail').value.trim()
+  };
+  await fetch('/api/smtp/config', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(payload)
+  });
+
+  try {
+    const r = await fetch('/api/smtp/test', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({email})
+    }).then(r => r.json());
+
+    if (r.success) {
+      res.className = 'alert alert-success mt-2';
+      res.textContent = '✓ ' + r.message;
+    } else {
+      res.className = 'alert alert-danger mt-2';
+      res.textContent = '✗ ' + r.message;
+    }
+  } catch(e) {
+    res.className = 'alert alert-danger mt-2';
+    res.textContent = '✗ ' + e.message;
+  }
+}
+
+// ── Subscriptions modal ───────────────────────────────────────────────────────
+
+async function openSubModal() {
+  document.getElementById('subListBody').innerHTML =
+    '<div class="text-center text-muted py-3"><div class="spinner-border spinner-border-sm"></div></div>';
+  openEmModal('subModal');
+  await refreshSubList();
+}
+
+async function refreshSubList() {
+  let subs = [];
+  try { subs = await fetch('/api/subscriptions').then(r => r.json()); } catch(e) {}
+
+  const body = document.getElementById('subListBody');
+  if (subs.length === 0) {
+    body.innerHTML = `
+      <div class="text-center text-muted py-4">
+        <i class="bi bi-send display-5 d-block mb-2"></i>
+        <p class="mb-0">No scheduled reports yet.</p>
+        <p class="small">Create one to have voicemail summaries emailed automatically.</p>
+      </div>`;
+    return;
+  }
+
+  const schedLabel = s => {
+    if (s.schedule === 'WEEKLY') return `Weekly · ${s.scheduleDay} · ${s.scheduleTime}`;
+    return `Daily · ${s.scheduleTime}`;
+  };
+  const periodLabel = p => ({'7d':'7 Days','30d':'30 Days','60d':'60 Days','90d':'90 Days'})[p] || p;
+  const viewLabel   = v => ({'user':'Users','queues':'Queues','both':'Both'})[v] || v;
+
+  body.innerHTML = subs.map(s => `
+    <div class="sub-row">
+      <div style="width:10px;height:10px;border-radius:50%;background:${s.enabled?'#16a34a':'#9ca3af'};flex-shrink:0;" title="${s.enabled?'Active':'Paused'}"></div>
+      <div class="sub-row-info">
+        <div class="sub-row-name">${esc(s.name)}</div>
+        <div class="sub-row-meta">
+          ${schedLabel(s)} &nbsp;·&nbsp; ${viewLabel(s.viewMode)} &nbsp;·&nbsp; ${periodLabel(s.period)}
+          &nbsp;·&nbsp; ${(s.recipients||[]).length} recipient${(s.recipients||[]).length===1?'':'s'}
+        </div>
+      </div>
+      <div class="d-flex gap-1 flex-shrink-0">
+        <button class="btn btn-sm btn-outline-secondary" onclick="sendSubNow('${s.id}')" title="Send now">
+          <i class="bi bi-send"></i>
+        </button>
+        <button class="btn btn-sm btn-outline-primary" onclick="openSubEdit('${s.id}')">
+          <i class="bi bi-pencil"></i>
+        </button>
+        <button class="btn btn-sm btn-outline-danger" onclick="deleteSub('${s.id}','${esc(s.name)}')">
+          <i class="bi bi-trash"></i>
+        </button>
+      </div>
+    </div>`).join('');
+}
+
+async function deleteSub(id, name) {
+  if (!confirm(`Delete subscription "${name}"?`)) return;
+  await fetch('/api/subscriptions/' + id, {method:'DELETE'});
+  await refreshSubList();
+}
+
+async function sendSubNow(id) {
+  const btn = event.currentTarget;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+  try {
+    const r = await fetch('/api/subscriptions/' + id + '/send', {method:'POST'}).then(r=>r.json());
+    if (r.sent) {
+      btn.innerHTML = '<i class="bi bi-check-lg text-success"></i>';
+      setTimeout(() => { btn.innerHTML = '<i class="bi bi-send"></i>'; btn.disabled = false; }, 3000);
+    } else {
+      alert('Send failed: ' + (r.error || 'Unknown error'));
+      btn.innerHTML = '<i class="bi bi-send"></i>'; btn.disabled = false;
+    }
+  } catch(e) {
+    alert('Send failed: ' + e.message);
+    btn.innerHTML = '<i class="bi bi-send"></i>'; btn.disabled = false;
+  }
+}
+
+// ── Add / Edit subscription modal ────────────────────────────────────────────
+
+async function openSubEdit(id) {
+  _subEditId = id;
+  const title = document.getElementById('subEditTitle');
+  const msg   = document.getElementById('subEditMsg');
+  msg.style.display = 'none';
+
+  if (id) {
+    title.innerHTML = '<i class="bi bi-pencil me-2 text-primary"></i>Edit Subscription';
+    let sub = {};
+    try { sub = await fetch('/api/subscriptions').then(r=>r.json()).then(arr=>arr.find(s=>s.id===id)||{}); } catch(e) {}
+    document.getElementById('subName').value      = sub.name       || '';
+    document.getElementById('subRecipients').value= (sub.recipients||[]).join(', ');
+    document.getElementById('subSchedule').value  = sub.schedule   || 'DAILY';
+    document.getElementById('subDay').value       = sub.scheduleDay|| 'MON';
+    document.getElementById('subTime').value      = sub.scheduleTime||'08:00';
+    document.getElementById('subViewMode').value  = sub.viewMode   || 'queues';
+    document.getElementById('subPeriod').value    = sub.period     || '30d';
+    document.getElementById('subFormat').value    = sub.format     || 'CSV';
+    document.getElementById('subEnabled').checked = sub.enabled !== false;
+  } else {
+    title.innerHTML = '<i class="bi bi-plus-circle me-2 text-primary"></i>New Subscription';
+    document.getElementById('subName').value      = '';
+    document.getElementById('subRecipients').value= '';
+    document.getElementById('subSchedule').value  = 'DAILY';
+    document.getElementById('subDay').value       = 'MON';
+    document.getElementById('subTime').value      = '08:00';
+    document.getElementById('subViewMode').value  = 'queues';
+    document.getElementById('subPeriod').value    = '30d';
+    document.getElementById('subFormat').value    = 'CSV';
+    document.getElementById('subEnabled').checked = true;
+  }
+
+  toggleWeeklyDay();
+  openEmModal('subEditModal');
+}
+
+function toggleWeeklyDay() {
+  const isWeekly = document.getElementById('subSchedule').value === 'WEEKLY';
+  document.getElementById('subDayRow').style.display = isWeekly ? '' : 'none';
+}
+
+async function saveSubEdit() {
+  const name = document.getElementById('subName').value.trim();
+  const recipRaw = document.getElementById('subRecipients').value;
+  const recipients = recipRaw.split(',').map(s=>s.trim()).filter(Boolean);
+
+  const msg = document.getElementById('subEditMsg');
+
+  if (!name) {
+    msg.className='alert alert-warning mt-3'; msg.style.display='block'; msg.style.fontSize='.82rem'; msg.style.padding='8px 12px';
+    msg.textContent='Please enter a subscription name.'; return;
+  }
+  if (recipients.length === 0) {
+    msg.className='alert alert-warning mt-3'; msg.style.display='block'; msg.style.fontSize='.82rem'; msg.style.padding='8px 12px';
+    msg.textContent='Please add at least one recipient email.'; return;
+  }
+
+  const payload = {
+    name,
+    recipients,
+    schedule:     document.getElementById('subSchedule').value,
+    scheduleDay:  document.getElementById('subDay').value,
+    scheduleTime: document.getElementById('subTime').value,
+    viewMode:     document.getElementById('subViewMode').value,
+    period:       document.getElementById('subPeriod').value,
+    format:       document.getElementById('subFormat').value,
+    enabled:      document.getElementById('subEnabled').checked
+  };
+
+  try {
+    const url    = _subEditId ? '/api/subscriptions/' + _subEditId : '/api/subscriptions';
+    const method = _subEditId ? 'PUT' : 'POST';
+    await fetch(url, {method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+    closeEmModal('subEditModal');
+    await refreshSubList();
+  } catch(e) {
+    msg.className='alert alert-danger mt-3'; msg.style.display='block'; msg.style.fontSize='.82rem'; msg.style.padding='8px 12px';
+    msg.textContent='Save failed: '+e.message;
+  }
 }
 </script>
 </body>
