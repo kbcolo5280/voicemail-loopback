@@ -41,7 +41,7 @@ public class SubscriptionScheduler {
 
     // ── Hourly trigger ────────────────────────────────────────────────────────
 
-    @Scheduled(cron = "0 0 * * * *")   // top of every hour
+    @Scheduled(cron = "0 * * * * *")   // every minute
     public void runScheduled() {
         if (!smtpConfigStore.isConfigured()) return;
 
@@ -129,16 +129,19 @@ public class SubscriptionScheduler {
     // ── Due check ─────────────────────────────────────────────────────────────
 
     private boolean isDue(SubscriptionRecord sub) {
-        // Parse the configured hour (HH:mm → integer hour)
-        int scheduledHour = 8; // default
+        // Parse the configured hour and minute (HH:mm)
+        int scheduledHour   = 8;
+        int scheduledMinute = 0;
         if (sub.getScheduleTime() != null && sub.getScheduleTime().contains(":")) {
             try {
-                scheduledHour = Integer.parseInt(sub.getScheduleTime().split(":")[0]);
+                String[] parts  = sub.getScheduleTime().split(":");
+                scheduledHour   = Integer.parseInt(parts[0]);
+                scheduledMinute = Integer.parseInt(parts[1]);
             } catch (NumberFormatException ignored) { }
         }
 
-        int currentHour = LocalTime.now().getHour();
-        if (currentHour != scheduledHour) return false;
+        LocalTime now = LocalTime.now();
+        if (now.getHour() != scheduledHour || now.getMinute() != scheduledMinute) return false;
 
         LocalDate today = LocalDate.now();
 
