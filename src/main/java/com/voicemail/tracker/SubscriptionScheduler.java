@@ -91,15 +91,29 @@ public class SubscriptionScheduler {
         // Fetch voicemails
         List<VoicemailRecord> records;
         if ("queues".equals(sub.getViewMode())) {
-            records = voicemailService.fetchAllQueueVoicemails(sessionId, null, dateFrom, dateTo);
+            records = new java.util.ArrayList<>(voicemailService.fetchAllQueueVoicemails(sessionId, null, dateFrom, dateTo));
         } else if ("user".equals(sub.getViewMode())) {
-            records = voicemailService.fetchAllUserVoicemails(sessionId, null, dateFrom, dateTo);
+            records = new java.util.ArrayList<>(voicemailService.fetchAllUserVoicemails(sessionId, null, dateFrom, dateTo));
         } else {
             // "both" — merge user + queue voicemails
             List<VoicemailRecord> users  = voicemailService.fetchAllUserVoicemails(sessionId, null, dateFrom, dateTo);
             List<VoicemailRecord> queues = voicemailService.fetchAllQueueVoicemails(sessionId, null, dateFrom, dateTo);
             records = new java.util.ArrayList<>(users);
             records.addAll(queues);
+        }
+
+        // Filter by selected user / queue IDs if specified (empty list = include all)
+        java.util.List<String> selUsers  = sub.getSelectedUserIds();
+        java.util.List<String> selQueues = sub.getSelectedQueueIds();
+        if (selUsers  != null && !selUsers.isEmpty()) {
+            java.util.Set<String> userSet = new java.util.HashSet<>(selUsers);
+            records.removeIf(r -> "User".equals(r.getExtensionType())
+                    && !userSet.contains(r.getExtensionId()));
+        }
+        if (selQueues != null && !selQueues.isEmpty()) {
+            java.util.Set<String> queueSet = new java.util.HashSet<>(selQueues);
+            records.removeIf(r -> "Department".equals(r.getExtensionType())
+                    && !queueSet.contains(r.getExtensionId()));
         }
 
         // Sort by dateTime descending

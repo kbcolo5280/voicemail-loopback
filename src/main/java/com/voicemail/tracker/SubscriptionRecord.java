@@ -48,6 +48,12 @@ public class SubscriptionRecord {
     /** ISO-8601 string set at creation time. */
     private String createdAt = "";
 
+    /** Specific user extension IDs to include (empty = all users). */
+    private List<String> selectedUserIds = new ArrayList<>();
+
+    /** Specific queue/department extension IDs to include (empty = all queues). */
+    private List<String> selectedQueueIds = new ArrayList<>();
+
     // ── Getters & Setters ────────────────────────────────────────────────────
 
     public String getId()                        { return id; }
@@ -82,4 +88,10 @@ public class SubscriptionRecord {
 
     public String getCreatedAt()                 { return createdAt; }
     public void   setCreatedAt(String v)         { this.createdAt = v; }
+
+    public List<String> getSelectedUserIds()               { return selectedUserIds; }
+    public void         setSelectedUserIds(List<String> v) { this.selectedUserIds  = v != null ? v : new ArrayList<>(); }
+
+    public List<String> getSelectedQueueIds()               { return selectedQueueIds; }
+    public void         setSelectedQueueIds(List<String> v) { this.selectedQueueIds = v != null ? v : new ArrayList<>(); }
 }

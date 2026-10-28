@@ -538,7 +538,7 @@
       <div class="d-flex gap-2">
         <div class="em-form-row" style="flex:1">
           <label>View</label>
-          <select id="subViewMode" class="form-select form-select-sm">
+          <select id="subViewMode" class="form-select form-select-sm" onchange="toggleSubFilter()">
             <option value="queues">Call Queues</option>
             <option value="user">User Extensions</option>
             <option value="both">Both</option>
@@ -560,6 +560,10 @@
             <option value="HTML">HTML Email Only</option>
           </select>
         </div>
+      </div>
+      <div class="em-form-row mt-2" id="subFilterRow">
+        <label>Filter by User / Queue <span class="text-muted fw-normal small">(leave all unchecked to include everyone)</span></label>
+        <div id="subFilterList" style="max-height:130px;overflow-y:auto;border:1px solid #dee2e6;border-radius:6px;padding:6px 10px 4px;background:#fff;font-size:.83rem;"></div>
       </div>
       <div class="form-check mt-1">
         <input class="form-check-input" type="checkbox" id="subEnabled" checked />
@@ -1506,7 +1510,9 @@ function fmtDT(iso) {
 
 // ── Email / Subscription Modal Functions ─────────────────────────────────────
 
-let _subEditId = null; // null = new, string = editing existing
+let _subEditId              = null;
+let _subEditSelectedUserIds  = [];
+let _subEditSelectedQueueIds = []; // null = new, string = editing existing
 
 function openEmModal(id) {
   document.getElementById(id).style.display = 'flex';
@@ -1769,6 +1775,8 @@ async function openSubEdit(id) {
     document.getElementById('subPeriod').value    = sub.period     || '30d';
     document.getElementById('subFormat').value    = sub.format     || 'CSV';
     document.getElementById('subEnabled').checked = sub.enabled !== false;
+    _subEditSelectedUserIds  = sub.selectedUserIds  || [];
+    _subEditSelectedQueueIds = sub.selectedQueueIds || [];
   } else {
     title.innerHTML = '<i class="bi bi-plus-circle me-2 text-primary"></i>New Subscription';
     document.getElementById('subName').value      = '';
@@ -1780,10 +1788,50 @@ async function openSubEdit(id) {
     document.getElementById('subPeriod').value    = '30d';
     document.getElementById('subFormat').value    = 'CSV';
     document.getElementById('subEnabled').checked = true;
+    _subEditSelectedUserIds  = [];
+    _subEditSelectedQueueIds = [];
   }
 
   toggleWeeklyDay();
+  toggleSubFilter();
   openEmModal('subEditModal');
+}
+
+function toggleSubFilter() {
+  const mode = document.getElementById('subViewMode').value;
+  const list  = document.getElementById('subFilterList');
+  list.innerHTML = '';
+
+  const users  = allExtensions.filter(e => e.type === 'User'       && e.name);
+  const queues = allExtensions.filter(e => e.type === 'Department' && e.name);
+
+  function buildSection(title, items, prefix, selectedIds) {
+    if (!items.length) return;
+    if (title) {
+      const hdr = document.createElement('div');
+      hdr.className = 'text-muted fw-semibold mb-1 mt-1';
+      hdr.style.fontSize = '.78rem';
+      hdr.textContent = title;
+      list.appendChild(hdr);
+    }
+    items.forEach(item => {
+      const div = document.createElement('div');
+      div.className = 'form-check mb-0';
+      const checked = selectedIds.includes(String(item.id)) ? 'checked' : '';
+      const lbl = esc(item.name + (item.extensionNumber ? ' (' + item.extensionNumber + ')' : ''));
+      div.innerHTML = '<input class="form-check-input" type="checkbox" id="' + prefix + '_' + item.id +
+        '" value="' + item.id + '" data-ftype="' + prefix + '" ' + checked + '>' +
+        '<label class="form-check-label" for="' + prefix + '_' + item.id + '">' + lbl + '</label>';
+      list.appendChild(div);
+    });
+  }
+
+  const showUsers  = mode === 'user'   || mode === 'both';
+  const showQueues = mode === 'queues' || mode === 'both';
+  const showBoth   = showUsers && showQueues;
+
+  if (showUsers)  buildSection(showBoth ? 'Users'  : '', users,  'fuser',  _subEditSelectedUserIds);
+  if (showQueues) buildSection(showBoth ? 'Queues' : '', queues, 'fqueue', _subEditSelectedQueueIds);
 }
 
 function toggleWeeklyDay() {
@@ -1816,7 +1864,9 @@ async function saveSubEdit() {
     viewMode:     document.getElementById('subViewMode').value,
     period:       document.getElementById('subPeriod').value,
     format:       document.getElementById('subFormat').value,
-    enabled:      document.getElementById('subEnabled').checked
+    enabled:      document.getElementById('subEnabled').checked,
+    selectedUserIds:  [...document.querySelectorAll('[data-ftype="fuser"]:checked')].map(cb => cb.value),
+    selectedQueueIds: [...document.querySelectorAll('[data-ftype="fqueue"]:checked')].map(cb => cb.value)
   };
 
   try {
