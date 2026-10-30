@@ -24,6 +24,13 @@ public class TokenStore {
     private static final String DATA_DIR  = "/data";
     private static final String DATA_FILE = "/data/tokens.json";
 
+    /**
+     * Fixed session key used by the background scheduler so it can fire
+     * email reports even after all browser sessions have expired or logged out.
+     * Saved whenever any user successfully completes OAuth.
+     */
+    public static final String SCHEDULER_SESSION = "_scheduler";
+
     private final ObjectMapper mapper = new ObjectMapper();
 
     public static class Entry {
@@ -112,20 +119,46 @@ public class TokenStore {
         persist();
     }
 
+    /**
+     * Returns a session ID suitable for the background scheduler.
+     * <ol>
+     *   <li>Prefers the dedicated {@value #SCHEDULER_SESSION} background token
+     *       (active or refreshable) — it survives user logout and server restarts.</li>
+     *   <li>Falls back to any other active user-session token.</li>
+     *   <li>As a last resort returns any expired-but-refreshable entry so
+     *       {@link VoicemailService#getClient} can attempt a token refresh.</li>
+     * </ol>
+     * Returns {@code null} only if the store is empty or every token is both
+     * expired and carries no refresh token.
+     */
     public String getAnyActiveSessionId() {
         long now = System.currentTimeMillis();
-        String fallback = null;
-        for (Map.Entry<String, Entry> entry : store.entrySet()) {
-            if (entry.getValue().expiresAtMs > now) {
-                return entry.getKey();
+
+        // 1. Prefer the dedicated background scheduler token
+        Entry schedulerEntry = store.get(SCHEDULER_SESSION);
+        if (schedulerEntry != null) {
+            if (schedulerEntry.expiresAtMs > now) {
+                return SCHEDULER_SESSION;   // active
             }
-            if (entry.getValue().token != null
-                    && entry.getValue().token.refresh_token != null
-                    && fallback == null) {
-                fallback = entry.getKey();
+            if (schedulerEntry.token != null && schedulerEntry.token.refresh_token != null) {
+                return SCHEDULER_SESSION;   // expired but refreshable
             }
         }
-        return fallback;
+
+        // 2. Fall back to any active user session
+        String refreshable = null;
+        for (Map.Entry<String, Entry> e : store.entrySet()) {
+            if (SCHEDULER_SESSION.equals(e.getKey())) continue;
+            if (e.getValue().expiresAtMs > now) {
+                return e.getKey();          // active user session
+            }
+            if (e.getValue().token != null
+                    && e.getValue().token.refresh_token != null
+                    && refreshable == null) {
+                refreshable = e.getKey();   // expired but refreshable — keep as fallback
+            }
+        }
+        return refreshable;
     }
 
     private static PersistedToken toPersistedToken(String sessionId, Entry e) {

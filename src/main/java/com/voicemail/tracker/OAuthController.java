@@ -86,6 +86,8 @@ public class OAuthController {
 
             rc.authorize(code, config.getRedirectUri());
             tokenStore.save(session.getId(), rc.token);
+            // Save a background copy so the scheduler keeps running after logout
+            tokenStore.save(TokenStore.SCHEDULER_SESSION, rc.token);
 
             // Register the RC webhook subscription on the first login (no-op after that)
             webhookService.ensureRegistered(session.getId());
