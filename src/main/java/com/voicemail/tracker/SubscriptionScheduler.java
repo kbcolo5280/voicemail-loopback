@@ -13,16 +13,11 @@ import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Runs every hour to check which email subscriptions are due and fires them.
+ * Runs every minute to check which email subscriptions are due and fires them.
  *
  * Schedule logic:
- *  - DAILY  : fires once per day at the hour matching scheduleTime
- *  - WEEKLY : fires once per week on scheduleDay at the hour matching scheduleTime
- *
- * Because this runs in the cloud without an interactive user session, it
- * borrows any active RC session via {@link TokenStore#getAnyActiveSessionId()}.
- * If no one is logged in, the run is skipped — reports will fire on the next
- * scheduled tick after someone logs in.
+ *  - DAILY  : fires once per day at the HH:mm matching scheduleTime in the subscription's timezone
+ *  - WEEKLY : fires once per week on scheduleDay at the HH:mm in the subscription's timezone
  */
 @Component
 public class SubscriptionScheduler {
@@ -36,10 +31,8 @@ public class SubscriptionScheduler {
     @Autowired private TokenStore           tokenStore;
     @Autowired private SmtpConfigStore      smtpConfigStore;
 
-    /** Tracks the LocalDate on which each subscription was last successfully sent. */
+    /** Tracks the LocalDate (in each subscription's own timezone) when last sent. */
     private final ConcurrentHashMap<String, LocalDate> lastSentDate = new ConcurrentHashMap<>();
-
-    // ── Hourly trigger ────────────────────────────────────────────────────────
 
     @Scheduled(cron = "0 * * * * *")   // every minute
     public void runScheduled() {
@@ -47,12 +40,11 @@ public class SubscriptionScheduler {
 
         String sessionId = tokenStore.getAnyActiveSessionId();
         if (sessionId == null) {
-            log.info("[SubscriptionScheduler] No active RC session — skipping run");
+            log.info("[SubscriptionScheduler] No active or refreshable RC session — skipping run");
             return;
         }
 
-        int hour = LocalTime.now().getHour();
-        log.info("[SubscriptionScheduler] Hourly check at hour={}", hour);
+        log.info("[SubscriptionScheduler] Checking subscriptions at server time={}Z", LocalTime.now(ZoneOffset.UTC));
 
         for (SubscriptionRecord sub : subscriptionStore.getAll()) {
             if (!sub.isEnabled()) continue;
@@ -60,24 +52,16 @@ public class SubscriptionScheduler {
                 try {
                     runSubscription(sub, sessionId);
                 } catch (Exception e) {
-                    log.error("[SubscriptionScheduler] '{}' failed: {}", sub.getName(), e.getMessage());
+                    log.error("[SubscriptionScheduler] '{}" failed: {}", sub.getName(), e.getMessage());
                 }
             }
         }
     }
 
-    // ── Public run method (also called by the /send endpoint) ────────────────
-
-    /**
-     * Fetches voicemail data for the subscription's configured view and period,
-     * generates the report, and sends it to all recipients.
-     *
-     * @param sub       the subscription to run
-     * @param sessionId an active RC session ID to use for API calls
-     */
     public void runSubscription(SubscriptionRecord sub, String sessionId) throws Exception {
-        // Compute date range from period
-        LocalDate today = LocalDate.now();
+        ZoneId zone  = resolveZone(sub);
+        LocalDate today = LocalDate.now(zone);
+
         int days = switch (sub.getPeriod()) {
             case "7d"  -> 7;
             case "30d" -> 30;
@@ -85,24 +69,21 @@ public class SubscriptionScheduler {
             case "90d" -> 90;
             default    -> 30;
         };
-        String dateFrom = today.minusDays(days).toString();   // YYYY-MM-DD
+        String dateFrom = today.minusDays(days).toString();
         String dateTo   = today.toString();
 
-        // Fetch voicemails
         List<VoicemailRecord> records;
         if ("queues".equals(sub.getViewMode())) {
             records = new java.util.ArrayList<>(voicemailService.fetchAllQueueVoicemails(sessionId, null, dateFrom, dateTo));
         } else if ("user".equals(sub.getViewMode())) {
             records = new java.util.ArrayList<>(voicemailService.fetchAllUserVoicemails(sessionId, null, dateFrom, dateTo));
         } else {
-            // "both" — merge user + queue voicemails
             List<VoicemailRecord> users  = voicemailService.fetchAllUserVoicemails(sessionId, null, dateFrom, dateTo);
             List<VoicemailRecord> queues = voicemailService.fetchAllQueueVoicemails(sessionId, null, dateFrom, dateTo);
             records = new java.util.ArrayList<>(users);
             records.addAll(queues);
         }
 
-        // Filter by selected user / queue IDs if specified (empty list = include all)
         java.util.List<String> selUsers  = sub.getSelectedUserIds();
         java.util.List<String> selQueues = sub.getSelectedQueueIds();
         if (selUsers  != null && !selUsers.isEmpty()) {
@@ -116,34 +97,28 @@ public class SubscriptionScheduler {
                     && !queueSet.contains(r.getExtensionId()));
         }
 
-        // Sort by dateTime descending
         records.sort((a, b) -> {
             String da = a.getDateTime() != null ? a.getDateTime() : "";
             String db = b.getDateTime() != null ? b.getDateTime() : "";
             return db.compareTo(da);
         });
 
-        // Generate content
         String subject     = sub.getName() + " — Voicemail Report (" + sub.getPeriod() + ")";
         String htmlBody    = reportService.generateHtmlEmail(records, sub.getPeriod(), sub.getViewMode());
         String csvContent  = reportService.generateCsv(records);
         String csvFilename = "voicemail-report-" + today + ".csv";
 
-        // Send to each recipient
         for (String recipient : sub.getRecipients()) {
             if (recipient == null || recipient.isBlank()) continue;
             emailService.sendEmail(recipient.trim(), subject, htmlBody, csvFilename, csvContent);
         }
 
         lastSentDate.put(sub.getId(), today);
-        log.info("[SubscriptionScheduler] '{}' sent to {} recipient(s), {} voicemails",
-                sub.getName(), sub.getRecipients().size(), records.size());
+        log.info("[SubscriptionScheduler] '{}" sent to {} recipient(s), {} voicemails (tz={})",
+                sub.getName(), sub.getRecipients().size(), records.size(), zone);
     }
 
-    // ── Due check ─────────────────────────────────────────────────────────────
-
     private boolean isDue(SubscriptionRecord sub) {
-        // Parse the configured hour and minute (HH:mm)
         int scheduledHour   = 8;
         int scheduledMinute = 0;
         if (sub.getScheduleTime() != null && sub.getScheduleTime().contains(":")) {
@@ -154,21 +129,29 @@ public class SubscriptionScheduler {
             } catch (NumberFormatException ignored) { }
         }
 
-        LocalTime now = LocalTime.now();
+        // Use the subscription's timezone — NOT the server's UTC clock
+        ZoneId    zone  = resolveZone(sub);
+        LocalTime now   = LocalTime.now(zone);
+        LocalDate today = LocalDate.now(zone);
+
         if (now.getHour() != scheduledHour || now.getMinute() != scheduledMinute) return false;
 
-        LocalDate today = LocalDate.now();
-
-        // For WEEKLY subscriptions, also check the day of week
         if ("WEEKLY".equalsIgnoreCase(sub.getSchedule())) {
             String todayAbbr = today.getDayOfWeek()
                     .getDisplayName(TextStyle.SHORT, Locale.ENGLISH)
-                    .toUpperCase(Locale.ENGLISH);  // MON, TUE, …, SUN
+                    .toUpperCase(Locale.ENGLISH);
             if (!todayAbbr.equals(sub.getScheduleDay())) return false;
         }
 
-        // Check it hasn't already been sent today
         LocalDate last = lastSentDate.get(sub.getId());
         return last == null || !last.equals(today);
+    }
+
+    private ZoneId resolveZone(SubscriptionRecord sub) {
+        try {
+            String tz = sub.getTimezone();
+            if (tz != null && !tz.isBlank()) return ZoneId.of(tz);
+        } catch (Exception ignored) { }
+        return ZoneOffset.UTC;
     }
 }
