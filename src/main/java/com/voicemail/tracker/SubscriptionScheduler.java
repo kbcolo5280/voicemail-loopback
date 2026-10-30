@@ -52,7 +52,7 @@ public class SubscriptionScheduler {
                 try {
                     runSubscription(sub, sessionId);
                 } catch (Exception e) {
-                    log.error("[SubscriptionScheduler] '{}" failed: {}", sub.getName(), e.getMessage());
+                    log.error("[SubscriptionScheduler] '{}' failed: {}", sub.getName(), e.getMessage());
                 }
             }
         }
@@ -114,7 +114,7 @@ public class SubscriptionScheduler {
         }
 
         lastSentDate.put(sub.getId(), today);
-        log.info("[SubscriptionScheduler] '{}" sent to {} recipient(s), {} voicemails (tz={})",
+        log.info("[SubscriptionScheduler] '{}' sent to {} recipient(s), {} voicemails (tz={})",
                 sub.getName(), sub.getRecipients().size(), records.size(), zone);
     }
 
