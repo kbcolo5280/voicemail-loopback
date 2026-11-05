@@ -172,6 +172,21 @@ public class VoicemailService {
                 || phoneDigits.endsWith(nameDigits);
     }
 
+    /**
+     * Composite key used for same-caller grouping.
+     * Uses "number|statedCallerName" when a transcript name is available,
+     * so different people calling from the same shared number are counted separately.
+     * Falls back to number-only when no stated name exists.
+     */
+    private String callerGroupKey(VoicemailRecord r) {
+        String num  = normalizeNumber(r.getCallerNumber());
+        String name = r.getStatedCallerName();
+        if (name != null && !name.isBlank()) {
+            return num + "|" + name.toLowerCase().trim();
+        }
+        return num != null ? num : "";
+    }
+
     private String normalizeNumber(String phoneNumber) {
         if (phoneNumber == null) return null;
         return phoneNumber.startsWith("+") ? phoneNumber.substring(1) : phoneNumber;
@@ -526,17 +541,17 @@ public class VoicemailService {
         }
 
         // ── Set same-caller count on each record ──────────────────────────────
-        // Counts how many voicemails share the same normalized caller number.
-        // The frontend uses this to show a badge when count > 1.
-        Map<String, Long> countByNumber = records.stream()
+        // Groups by number+statedCallerName when a transcript name is available,
+        // so two different people calling from the same number are counted separately.
+        // Falls back to number-only when no transcript name exists.
+        Map<String, Long> countByGroup = records.stream()
                 .filter(r -> r.getCallerNumber() != null)
                 .collect(Collectors.groupingBy(
-                        r -> normalizeNumber(r.getCallerNumber()),
+                        r -> callerGroupKey(r),
                         Collectors.counting()));
         for (VoicemailRecord vm : records) {
             if (vm.getCallerNumber() != null) {
-                long count = countByNumber.getOrDefault(
-                        normalizeNumber(vm.getCallerNumber()), 1L);
+                long count = countByGroup.getOrDefault(callerGroupKey(vm), 1L);
                 vm.setSameCallerCount((int) count);
             }
         }
