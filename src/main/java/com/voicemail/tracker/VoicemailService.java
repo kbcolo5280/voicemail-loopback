@@ -485,10 +485,9 @@ public class VoicemailService {
         callsByNumber.values().forEach(list ->
                 list.sort(Comparator.comparing(c -> c.startTime)));
 
-        // ── Match each voicemail to first outbound call to that number after VM ──
-        // Process newest voicemails first so the most-recent message gets the callback credit.
-        // Each outbound call is consumed (removed from the bucket) once matched, so a single
-        // callback event cannot satisfy multiple voicemails from the same caller.
+        // ── Match each voicemail to first outbound call to that number after the VM ──
+        // Calls are NOT consumed — multiple voicemails from the same caller all get credit
+        // for the same callback if it happened after each of them.
         List<VoicemailRecord> sorted = new ArrayList<>(records);
         sorted.sort(Comparator.comparing(r -> r.getDateTime(),
                 Comparator.nullsLast(Comparator.reverseOrder())));
@@ -522,8 +521,23 @@ public class VoicemailService {
                     String recId  = recUri.substring(recUri.lastIndexOf('/') + 1);
                     if (!recId.isBlank()) vm.setCallbackRecordingId(recId);
                 }
-                it.remove(); // consume this call — can't match another voicemail
                 break; // matched, move on to next voicemail
+            }
+        }
+
+        // ── Set same-caller count on each record ──────────────────────────────
+        // Counts how many voicemails share the same normalized caller number.
+        // The frontend uses this to show a badge when count > 1.
+        Map<String, Long> countByNumber = records.stream()
+                .filter(r -> r.getCallerNumber() != null)
+                .collect(Collectors.groupingBy(
+                        r -> normalizeNumber(r.getCallerNumber()),
+                        Collectors.counting()));
+        for (VoicemailRecord vm : records) {
+            if (vm.getCallerNumber() != null) {
+                long count = countByNumber.getOrDefault(
+                        normalizeNumber(vm.getCallerNumber()), 1L);
+                vm.setSameCallerCount((int) count);
             }
         }
     }

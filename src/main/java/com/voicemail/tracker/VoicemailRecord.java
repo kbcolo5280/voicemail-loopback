@@ -65,6 +65,13 @@ public class VoicemailRecord {
      */
     private String callbackRecordingId;
 
+    /**
+     * Number of voicemails from this caller number in the current dataset.
+     * When > 1 the frontend shows a same-caller badge so the user knows
+     * this person called multiple times.
+     */
+    private int sameCallerCount = 1;
+
     // ----- Getters & Setters -----
 
     public String getId()                               { return id; }
@@ -111,4 +118,7 @@ public class VoicemailRecord {
 
     public String getCallbackRecordingId()               { return callbackRecordingId; }
     public void   setCallbackRecordingId(String v)       { this.callbackRecordingId = v; }
+
+    public int    getSameCallerCount()                    { return sameCallerCount; }
+    public void   setSameCallerCount(int v)               { this.sameCallerCount = v; }
 }

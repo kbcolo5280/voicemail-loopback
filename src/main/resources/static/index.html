@@ -1268,7 +1268,10 @@ function renderPage() {
     return `
     <tr class="${vm.readStatus === 'Unread' ? 'table-warning' : ''}">
       <td><span class="badge ${vm.readStatus === 'Unread' ? 'badge-unread' : 'badge-read'}">${vm.readStatus || '—'}</span></td>
-      <td>${esc(vm.callerName) || '<span class="text-muted">Unknown</span>'}</td>
+      <td>
+        ${esc(vm.callerName) || '<span class="text-muted">Unknown</span>'}
+        ${vm.sameCallerCount > 1 ? `<span class="badge bg-secondary ms-1" title="${vm.sameCallerCount} voicemails from this caller">${vm.sameCallerCount}&times;</span>` : ''}
+      </td>
       <td class="text-nowrap">${esc(vm.callerNumber) || '<span class="text-muted">—</span>'}</td>
       <td>${esc(vm.extensionName) || '<span class="text-muted">—</span>'}</td>
       <td><span class="badge ${vm.extensionType === 'Department' ? 'bg-info text-dark' : 'bg-secondary'}">${vm.extensionType === 'Department' ? 'Queue' : 'User'}</span></td>
