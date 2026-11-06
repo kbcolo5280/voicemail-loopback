@@ -507,6 +507,26 @@ public class VoicemailService {
         System.out.println("[VoicemailService] Callback enrichment: fetched "
                 + allCalls.size() + " outbound calls in " + (page) + " page(s)");
 
+        // ── Deduplicate by sessionId ──────────────────────────────────────────────
+        // RC sometimes logs multiple call-legs of one physical outbound call as
+        // separate entries with slightly different startTimes.  Keeping only the
+        // first entry per sessionId ensures a single physical call can only be
+        // claimed by one callerGroup.
+        {
+            java.util.LinkedHashMap<String, CallLogRecord> seen = new java.util.LinkedHashMap<>();
+            for (CallLogRecord call : allCalls) {
+                String key = (call.sessionId != null && !call.sessionId.isBlank())
+                        ? call.sessionId : call.startTime;
+                seen.putIfAbsent(key, call);
+            }
+            int before = allCalls.size();
+            allCalls = new ArrayList<>(seen.values());
+            int after  = allCalls.size();
+            if (before != after)
+                System.out.println("[VoicemailService] Deduped calls by sessionId: "
+                        + before + " → " + after);
+        }
+
         // ── Register recordings from every outbound call ──
         for (CallLogRecord call : allCalls) {
             if (call.recording != null && call.recording.uri != null
