@@ -175,6 +175,10 @@ public class VoicemailController {
                 rec.setId(item.get("id"));
                 rec.setCallerNumber(item.get("callerNumber"));
                 rec.setDateTime(item.get("dateTime"));
+                // statedCallerName is needed so the per-callerGroup matching can
+                // distinguish different people calling from the same shared number.
+                String sn = item.get("statedCallerName");
+                if (sn != null && !sn.isBlank()) rec.setStatedCallerName(sn);
                 stubs.add(rec);
             }
 

@@ -852,7 +852,7 @@ function getSlaStatus(vm) {
 // ── Background callback enrichment ──────────────────────────────────────────
 /**
  * After the initial voicemail table renders, POST the minimal stub data
- * (id, callerNumber, dateTime) to /api/voicemails/enrich-callbacks.
+ * (id, callerNumber, dateTime, statedCallerName) to /api/voicemails/enrich-callbacks.
  * The backend runs the same windowed outbound-call matching as before but
  * only returns {id, callbackBy, callbackTime} — we merge those fields into
  * allRecords and re-render.
@@ -876,7 +876,7 @@ async function enrichCallbacksBackground(gen) {
   if (badge) badge.classList.remove('hidden');
   try {
     const items = unchecked
-      .map(r => ({ id: r.id, callerNumber: r.callerNumber, dateTime: r.dateTime }));
+      .map(r => ({ id: r.id, callerNumber: r.callerNumber, dateTime: r.dateTime, statedCallerName: r.statedCallerName || '' }));
 
     if (items.length === 0) return;
 
