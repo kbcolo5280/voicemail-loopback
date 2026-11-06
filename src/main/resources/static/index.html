@@ -1178,7 +1178,7 @@ async function enrichTranscripts() {
   if (allRecords.length === 0) return;
 
   const eligible = allRecords.filter(r =>
-    r.transcriptAttachmentId && r.extensionId && r.id && !enrichmentCache[r.id]
+    r.transcriptAttachmentId && r.extensionId && r.id && !(enrichmentCache[r.id] && enrichmentCache[r.id].transcriptChecked)
   );
   if (eligible.length === 0) {
     transcriptsLoaded = true;
@@ -1210,6 +1210,7 @@ async function enrichTranscripts() {
     enriched.forEach(e => {
       byId[e.id] = e;
       if (!enrichmentCache[e.id]) enrichmentCache[e.id] = {};
+      enrichmentCache[e.id].transcriptChecked = true;   // prevent re-fetch even if transcript empty
       if (e.transcript)       enrichmentCache[e.id].transcript       = e.transcript;
       if (e.statedCallerName) enrichmentCache[e.id].statedCallerName = e.statedCallerName;
     });
