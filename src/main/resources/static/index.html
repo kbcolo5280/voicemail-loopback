@@ -534,6 +534,19 @@
           <label>Send Time (24h)</label>
           <input id="subTime" type="time" class="form-control form-control-sm" value="08:00" />
         </div>
+        <div class="em-form-row" style="flex:1">
+          <label>Timezone</label>
+          <select id="subTimezone" class="form-select form-select-sm">
+            <option value="America/New_York">Eastern (ET)</option>
+            <option value="America/Chicago">Central (CT)</option>
+            <option value="America/Denver" selected>Mountain (MT)</option>
+            <option value="America/Los_Angeles">Pacific (PT)</option>
+            <option value="America/Phoenix">Arizona (no DST)</option>
+            <option value="America/Anchorage">Alaska (AKT)</option>
+            <option value="Pacific/Honolulu">Hawaii (HT)</option>
+            <option value="UTC">UTC</option>
+          </select>
+        </div>
       </div>
       <div class="d-flex gap-2">
         <div class="em-form-row" style="flex:1">
@@ -852,7 +865,7 @@ function getSlaStatus(vm) {
 // ── Background callback enrichment ──────────────────────────────────────────
 /**
  * After the initial voicemail table renders, POST the minimal stub data
- * (id, callerNumber, dateTime, statedCallerName) to /api/voicemails/enrich-callbacks.
+ * (id, callerNumber, dateTime) to /api/voicemails/enrich-callbacks.
  * The backend runs the same windowed outbound-call matching as before but
  * only returns {id, callbackBy, callbackTime} — we merge those fields into
  * allRecords and re-render.
@@ -876,7 +889,7 @@ async function enrichCallbacksBackground(gen) {
   if (badge) badge.classList.remove('hidden');
   try {
     const items = unchecked
-      .map(r => ({ id: r.id, callerNumber: r.callerNumber, dateTime: r.dateTime, statedCallerName: r.statedCallerName || '' }));
+      .map(r => ({ id: r.id, callerNumber: r.callerNumber, dateTime: r.dateTime }));
 
     if (items.length === 0) return;
 
@@ -1118,21 +1131,19 @@ async function loadVoicemails(silent = false) {
     transcriptsLoaded = false; // let enrichTranscripts run; cache filter skips already-fetched records
     currentPage       = 1;
 
-    // Always enrich transcripts before callbacks — statedCallerName is required
-    // for per-callerGroup callback matching even when the columns are hidden.
-    // Show the loading spinner only when columns are actually visible.
-    if (showStatedName || showTranscript) setTranscriptLoadingUI(true);
-    await enrichTranscripts();
-    if (showStatedName || showTranscript) setTranscriptLoadingUI(false);
+    // If transcript columns are on, enrich straight away so the user sees data
+    if (showStatedName || showTranscript) {
+      setTranscriptLoadingUI(true);
+      await enrichTranscripts();
+      setTranscriptLoadingUI(false);
+    }
 
     renderTable(allRecords);
     updateSummary(allRecords);
     document.getElementById('lastRefreshedText').textContent =
       'Last refreshed: ' + new Date().toLocaleTimeString();
 
-    // Kick off background callback enrichment — does NOT block the UI.
-    // Transcripts have already run so statedCallerName is populated and
-    // different callers from the same number get separate callerGroups.
+    // Kick off background callback enrichment — does NOT block the UI
     enrichCallbacksBackground(gen);
 
   } catch (err) {
@@ -1270,10 +1281,7 @@ function renderPage() {
     return `
     <tr class="${vm.readStatus === 'Unread' ? 'table-warning' : ''}">
       <td><span class="badge ${vm.readStatus === 'Unread' ? 'badge-unread' : 'badge-read'}">${vm.readStatus || '—'}</span></td>
-      <td>
-        ${esc(vm.callerName) || '<span class="text-muted">Unknown</span>'}
-        ${vm.sameCallerCount > 1 ? `<span class="badge bg-secondary ms-1" title="${vm.sameCallerCount} voicemails from this caller">${vm.sameCallerCount}&times;</span>` : ''}
-      </td>
+      <td>${esc(vm.callerName) || '<span class="text-muted">Unknown</span>'}</td>
       <td class="text-nowrap">${esc(vm.callerNumber) || '<span class="text-muted">—</span>'}</td>
       <td>${esc(vm.extensionName) || '<span class="text-muted">—</span>'}</td>
       <td><span class="badge ${vm.extensionType === 'Department' ? 'bg-info text-dark' : 'bg-secondary'}">${vm.extensionType === 'Department' ? 'Queue' : 'User'}</span></td>
@@ -1703,9 +1711,16 @@ async function refreshSubList() {
     return;
   }
 
+  const tzAbbr = tz => {
+    const m = {'America/New_York':'ET','America/Chicago':'CT','America/Denver':'MT',
+                'America/Los_Angeles':'PT','America/Phoenix':'AZ','America/Anchorage':'AKT',
+                'Pacific/Honolulu':'HT','UTC':'UTC'};
+    return m[tz] || tz || 'MT';
+  };
   const schedLabel = s => {
-    if (s.schedule === 'WEEKLY') return `Weekly · ${s.scheduleDay} · ${s.scheduleTime}`;
-    return `Daily · ${s.scheduleTime}`;
+    const tz = tzAbbr(s.timezone);
+    if (s.schedule === 'WEEKLY') return `Weekly · ${s.scheduleDay} · ${s.scheduleTime} ${tz}`;
+    return `Daily · ${s.scheduleTime} ${tz}`;
   };
   const periodLabel = p => ({'7d':'7 Days','30d':'30 Days','60d':'60 Days','90d':'90 Days'})[p] || p;
   const viewLabel   = v => ({'user':'Users','queues':'Queues','both':'Both'})[v] || v;
@@ -1776,6 +1791,7 @@ async function openSubEdit(id) {
     document.getElementById('subSchedule').value  = sub.schedule   || 'DAILY';
     document.getElementById('subDay').value       = sub.scheduleDay|| 'MON';
     document.getElementById('subTime').value      = sub.scheduleTime||'08:00';
+    document.getElementById('subTimezone').value  = sub.timezone   || 'America/Denver';
     document.getElementById('subViewMode').value  = sub.viewMode   || 'queues';
     document.getElementById('subPeriod').value    = sub.period     || '30d';
     document.getElementById('subFormat').value    = sub.format     || 'CSV';
@@ -1789,6 +1805,7 @@ async function openSubEdit(id) {
     document.getElementById('subSchedule').value  = 'DAILY';
     document.getElementById('subDay').value       = 'MON';
     document.getElementById('subTime').value      = '08:00';
+    document.getElementById('subTimezone').value  = 'America/Denver';
     document.getElementById('subViewMode').value  = 'queues';
     document.getElementById('subPeriod').value    = '30d';
     document.getElementById('subFormat').value    = 'CSV';
@@ -1874,6 +1891,7 @@ async function saveSubEdit() {
     schedule:     document.getElementById('subSchedule').value,
     scheduleDay:  document.getElementById('subDay').value,
     scheduleTime: document.getElementById('subTime').value,
+    timezone:     document.getElementById('subTimezone').value,
     viewMode:     document.getElementById('subViewMode').value,
     period:       document.getElementById('subPeriod').value,
     format:       document.getElementById('subFormat').value,
