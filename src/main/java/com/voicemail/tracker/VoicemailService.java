@@ -84,21 +84,14 @@ public class VoicemailService {
     // Stated-name pattern
     // -----------------------------------------------------------------------
 
-    // Matches caller self-identifications across several transcript formats:
-    //   • Natural speech:  "this is John", "my name is Jane Smith", "it's Mike"
-    //   • AI Receptionist: "Caller: John Smith", "caller is John Smith",
-    //                      "caller's name is Jane", "transfer from AI, John Smith calling"
+    // Matches caller self-identifications in voicemail transcripts.
+    // Natural speech phrases: "this is John", "my name is Jane Smith", "it's Mike", "I'm Sarah".
+    // AI Receptionist label format: "Caller: John Smith", "caller is Jane", "caller's name is Mike".
+    // The (?<=\s) alternative was intentionally removed — it was too broad with CASE_INSENSITIVE
+    // and captured words like "yeah" before reaching the actual name.
     private static final Pattern STATED_NAME_PATTERN = Pattern.compile(
-            "(?:" +
-            // natural speech
-            "(?:this is|my name is|it'?s|i'?m)" +
-            "|" +
-            // AI Receptionist label formats
-            "(?:caller(?:'s name)?\\s*(?:is|:)\\s*)" +
-            "|" +
-            // "... John Smith calling/is calling"
-            "(?<=\\s)" +
-            ")\\s*([A-Z][a-zA-Z'-]+(?:\\s+(?!(?:And|Or|But|To|In|At|For|With|From|Just|The|A|An|Of|On|Up|So|About|Calling|Reaching|Following|Trying|Getting|Transferred|Transfer)\\b)[A-Z][a-zA-Z'-]+){0,2})",
+            "(?:this is|my name is|it'?s|i'?m|caller(?:'s\\s+name)?\\s*(?:is|:))\\s+" +
+            "([A-Z][a-zA-Z'-]+(?:\\s+(?!(?:And|Or|But|To|In|At|For|With|From|Just|The|A|An|Of|On|Up|So|About|Calling|Reaching|Following|Trying|Getting)\\b)[A-Z][a-zA-Z'-]+){0,2})",
             Pattern.CASE_INSENSITIVE);
 
     // -----------------------------------------------------------------------
@@ -578,6 +571,11 @@ public class VoicemailService {
                         if (call.from != null) {
                             String name = call.from.name;
                             String ext  = call.from.extensionNumber;
+                            // Debug: log all from fields so we can confirm extensionNumber is populated
+                            System.out.println("[VoicemailService] callback from: name=" + name
+                                    + " extensionNumber=" + ext
+                                    + " extensionId=" + call.from.extensionId
+                                    + " phoneNumber=" + call.from.phoneNumber);
                             if (name != null && !name.isBlank()) {
                                 callbackBy = (ext != null && !ext.isBlank())
                                         ? name + " (" + ext + ")"
