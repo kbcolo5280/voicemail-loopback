@@ -535,12 +535,14 @@ public class VoicemailService {
         // same phone number each consume a distinct outbound call.
         java.util.Set<String> claimedCalls = new java.util.HashSet<>();
 
-        // Process groups in earliest-VM-first order so the oldest caller's group
-        // claims the earliest callback call.
+        // Process groups in newest-VM-first order so the most recent caller's group
+        // claims the first available callback call. When two different people call
+        // from the same shared number, the callback is most likely for the newest VM.
         vmsByGroup.entrySet().stream()
-                .sorted(Comparator.comparing(e -> e.getValue().stream()
+                .sorted(Comparator.comparing((java.util.Map.Entry<String, List<VoicemailRecord>> e) ->
+                        e.getValue().stream()
                         .map(vm -> vm.getDateTime() != null ? vm.getDateTime() : "")
-                        .min(Comparator.naturalOrder()).orElse("")))
+                        .max(Comparator.naturalOrder()).orElse("")).reversed())
                 .forEach(entry -> {
                     List<VoicemailRecord> groupVMs = entry.getValue();
                     String num = normalizeNumber(groupVMs.get(0).getCallerNumber());
