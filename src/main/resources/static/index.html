@@ -1118,19 +1118,21 @@ async function loadVoicemails(silent = false) {
     transcriptsLoaded = false; // let enrichTranscripts run; cache filter skips already-fetched records
     currentPage       = 1;
 
-    // If transcript columns are on, enrich straight away so the user sees data
-    if (showStatedName || showTranscript) {
-      setTranscriptLoadingUI(true);
-      await enrichTranscripts();
-      setTranscriptLoadingUI(false);
-    }
+    // Always enrich transcripts before callbacks — statedCallerName is required
+    // for per-callerGroup callback matching even when the columns are hidden.
+    // Show the loading spinner only when columns are actually visible.
+    if (showStatedName || showTranscript) setTranscriptLoadingUI(true);
+    await enrichTranscripts();
+    if (showStatedName || showTranscript) setTranscriptLoadingUI(false);
 
     renderTable(allRecords);
     updateSummary(allRecords);
     document.getElementById('lastRefreshedText').textContent =
       'Last refreshed: ' + new Date().toLocaleTimeString();
 
-    // Kick off background callback enrichment — does NOT block the UI
+    // Kick off background callback enrichment — does NOT block the UI.
+    // Transcripts have already run so statedCallerName is populated and
+    // different callers from the same number get separate callerGroups.
     enrichCallbacksBackground(gen);
 
   } catch (err) {
