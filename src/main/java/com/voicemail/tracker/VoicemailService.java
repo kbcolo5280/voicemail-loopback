@@ -579,14 +579,15 @@ public class VoicemailService {
         // same phone number each consume a distinct outbound call.
         java.util.Set<String> claimedCalls = new java.util.HashSet<>();
 
-        // Process groups in newest-VM-first order so the most recent caller's group
-        // claims the first available callback call. When two different people call
-        // from the same shared number, the callback is most likely for the newest VM.
+        // Process groups in oldest-VM-first (FIFO) order: agents typically call back
+        // whoever has been waiting longest. When two different people call from the
+        // same shared number, the callback is credited to whichever group has the
+        // oldest un-answered voicemail — matching normal call-center working order.
         vmsByGroup.entrySet().stream()
                 .sorted(Comparator.comparing((java.util.Map.Entry<String, List<VoicemailRecord>> e) ->
                         e.getValue().stream()
                         .map(vm -> vm.getDateTime() != null ? vm.getDateTime() : "")
-                        .max(Comparator.naturalOrder()).orElse("")).reversed())
+                        .max(Comparator.naturalOrder()).orElse("")))
                 .forEach(entry -> {
                     List<VoicemailRecord> groupVMs = entry.getValue();
                     String num = normalizeNumber(groupVMs.get(0).getCallerNumber());
