@@ -569,6 +569,13 @@ public class VoicemailService {
         // same phone number each consume a distinct outbound call.
         java.util.Set<String> claimedCalls = new java.util.HashSet<>();
 
+        // Track which caller numbers have already had a callback assigned.
+        // RC sometimes logs the same physical outbound call as multiple legs
+        // with slightly different startTimes — claimedCalls alone won't block
+        // a second group from claiming leg 2.  claimedNumbers ensures only the
+        // first (newest-VM) group for a given number gets a callback.
+        java.util.Set<String> claimedNumbers = new java.util.HashSet<>();
+
         // Process groups in newest-VM-first order so the most recent caller's group
         // claims the first available callback call. When two different people call
         // from the same shared number, the callback is most likely for the newest VM.
@@ -580,6 +587,11 @@ public class VoicemailService {
                 .forEach(entry -> {
                     List<VoicemailRecord> groupVMs = entry.getValue();
                     String num = normalizeNumber(groupVMs.get(0).getCallerNumber());
+                    // If another group for this number already claimed a callback, skip.
+                    // This prevents RC multi-leg entries from being matched to two
+                    // different callers who share the same phone number.
+                    if (claimedNumbers.contains(num)) return;
+
                     List<CallLogRecord> calls = callsByNumber.get(num);
                     if (calls == null || calls.isEmpty()) return;
 
@@ -599,8 +611,10 @@ public class VoicemailService {
                                 .anyMatch(vm -> call.startTime.compareTo(vm.getDateTime()) > 0);
                         if (!coversAny) continue;
 
-                        // Claim this call for this group
+                        // Claim this call for this group, and lock the number so
+                        // no other callerGroup can claim a second RC leg of the same call.
                         claimedCalls.add(claimKey);
+                        claimedNumbers.add(num);
 
                         // Build "Called Back By" string — include display extension number.
                         // RC call log returns extensionId (internal long ID), not the short
