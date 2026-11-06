@@ -84,8 +84,21 @@ public class VoicemailService {
     // Stated-name pattern
     // -----------------------------------------------------------------------
 
+    // Matches caller self-identifications across several transcript formats:
+    //   • Natural speech:  "this is John", "my name is Jane Smith", "it's Mike"
+    //   • AI Receptionist: "Caller: John Smith", "caller is John Smith",
+    //                      "caller's name is Jane", "transfer from AI, John Smith calling"
     private static final Pattern STATED_NAME_PATTERN = Pattern.compile(
-            "(?:this is|my name is|it'?s|i'?m)\\s+([A-Z][a-zA-Z'-]+(?:\\s+(?!(?:And|Or|But|To|In|At|For|With|From|Just|The|A|An|Of|On|Up|So|About|Calling|Calling|Reaching|Following|Trying|Getting)\\b)[A-Z][a-zA-Z'-]+){0,2})",
+            "(?:" +
+            // natural speech
+            "(?:this is|my name is|it'?s|i'?m)" +
+            "|" +
+            // AI Receptionist label formats
+            "(?:caller(?:'s name)?\\s*(?:is|:)\\s*)" +
+            "|" +
+            // "... John Smith calling/is calling"
+            "(?<=\\s)" +
+            ")\\s*([A-Z][a-zA-Z'-]+(?:\\s+(?!(?:And|Or|But|To|In|At|For|With|From|Just|The|A|An|Of|On|Up|So|About|Calling|Reaching|Following|Trying|Getting|Transferred|Transfer)\\b)[A-Z][a-zA-Z'-]+){0,2})",
             Pattern.CASE_INSENSITIVE);
 
     // -----------------------------------------------------------------------
@@ -267,6 +280,18 @@ public class VoicemailService {
                 }
 
                 if (msg.attachments != null) {
+                    // Log attachment types for debugging (helps diagnose AI Receptionist
+                    // transferred VMs that have no transcript — look for unexpected types
+                    // in Render logs, e.g. "Audio" only, never "AudioTranscription").
+                    java.util.StringJoiner attachTypes = new java.util.StringJoiner(",");
+                    for (var att : msg.attachments) {
+                        if (att.type != null) attachTypes.add(att.type);
+                    }
+                    if (!attachTypes.toString().contains("AudioTranscription")) {
+                        System.out.println("[VoicemailService] No AudioTranscription attachment for id="
+                                + msg.id + " from=" + (msg.from != null ? msg.from.phoneNumber : "?")
+                                + " attachmentTypes=[" + attachTypes + "]");
+                    }
                     for (var att : msg.attachments) {
                         if ("AudioTranscription".equals(att.type) && att.id != null) {
                             rec.setTranscriptAttachmentId(att.id.toString());
@@ -500,45 +525,96 @@ public class VoicemailService {
         callsByNumber.values().forEach(list ->
                 list.sort(Comparator.comparing(c -> c.startTime)));
 
-        // ── Match each voicemail to first outbound call to that number after the VM ──
-        // Calls are NOT consumed — multiple voicemails from the same caller all get credit
-        // for the same callback if it happened after each of them.
-        List<VoicemailRecord> sorted = new ArrayList<>(records);
-        sorted.sort(Comparator.comparing(r -> r.getDateTime(),
-                Comparator.nullsLast(Comparator.reverseOrder())));
+        // ── Match callbacks per callerGroup (number + statedCallerName) ──────────
+        // Each callerGroup consumes its own callback call independently, so two
+        // different people calling from the same shared number each get matched to
+        // the correct callback rather than sharing one.  All VMs within a group
+        // that pre-date the callback receive credit; the recording is attached only
+        // to the most-recent VM in the group (the one most likely to have triggered
+        // the callback).  Bug fixes applied here:
+        //   • Bug 1: per-group consumption prevents different callers sharing one callback
+        //   • Bug 2: callbackBy includes extension number, e.g. "Ken B (101)"
+        Map<String, List<VoicemailRecord>> vmsByGroup = records.stream()
+                .filter(r -> r.getCallerNumber() != null && r.getDateTime() != null)
+                .collect(Collectors.groupingBy(r -> callerGroupKey(r)));
 
-        for (VoicemailRecord vm : sorted) {
-            if (vm.getCallerNumber() == null || vm.getDateTime() == null) continue;
-            String num = normalizeNumber(vm.getCallerNumber());
-            List<CallLogRecord> calls = callsByNumber.get(num);
-            if (calls == null || calls.isEmpty()) continue;
+        // Track which calls have been claimed (num|startTime) so groups from the
+        // same phone number each consume a distinct outbound call.
+        java.util.Set<String> claimedCalls = new java.util.HashSet<>();
 
-            java.util.Iterator<CallLogRecord> it = calls.iterator();
-            while (it.hasNext()) {
-                CallLogRecord call = it.next();
-                if (call.startTime == null) continue;
-                if (call.startTime.compareTo(vm.getDateTime()) <= 0) continue; // must be after VM
+        // Process groups in earliest-VM-first order so the oldest caller's group
+        // claims the earliest callback call.
+        vmsByGroup.entrySet().stream()
+                .sorted(Comparator.comparing(e -> e.getValue().stream()
+                        .map(VoicemailRecord::getDateTime).filter(d -> d != null)
+                        .min(Comparator.naturalOrder()).orElse("")))
+                .forEach(entry -> {
+                    List<VoicemailRecord> groupVMs = entry.getValue();
+                    String num = normalizeNumber(groupVMs.get(0).getCallerNumber());
+                    List<CallLogRecord> calls = callsByNumber.get(num);
+                    if (calls == null || calls.isEmpty()) return;
 
-                vm.setCallbackTime(call.startTime);
-                if (call.from != null) {
-                    String name = call.from.name;
-                    if (name != null && !name.isBlank()) {
-                        vm.setCallbackBy(name);
-                    } else if (call.from.extensionNumber != null) {
-                        vm.setCallbackBy("Ext. " + call.from.extensionNumber);
-                    } else {
-                        vm.setCallbackBy(call.from.phoneNumber);
+                    // Sort group VMs oldest-first; the last element is the most recent
+                    groupVMs.sort(Comparator.comparing(VoicemailRecord::getDateTime,
+                            Comparator.nullsLast(Comparator.naturalOrder())));
+                    VoicemailRecord mostRecentVM = groupVMs.get(groupVMs.size() - 1);
+
+                    for (CallLogRecord call : calls) {
+                        if (call.startTime == null) continue;
+                        String claimKey = num + "|" + call.startTime;
+                        if (claimedCalls.contains(claimKey)) continue; // already used by another group
+
+                        // Call must come after at least one VM in this group
+                        boolean coversAny = groupVMs.stream()
+                                .anyMatch(vm -> call.startTime.compareTo(vm.getDateTime()) > 0);
+                        if (!coversAny) continue;
+
+                        // Claim this call for this group
+                        claimedCalls.add(claimKey);
+
+                        // Build "Called Back By" string — Bug 2: include extension number
+                        String callbackBy = null;
+                        if (call.from != null) {
+                            String name = call.from.name;
+                            String ext  = call.from.extensionNumber;
+                            if (name != null && !name.isBlank()) {
+                                callbackBy = (ext != null && !ext.isBlank())
+                                        ? name + " (" + ext + ")"
+                                        : name;
+                            } else if (ext != null && !ext.isBlank()) {
+                                callbackBy = "Ext. " + ext;
+                            } else if (call.from.phoneNumber != null) {
+                                callbackBy = call.from.phoneNumber;
+                            }
+                        }
+
+                        // Extract recording ID once
+                        String recId = null;
+                        if (call.recording != null && call.recording.uri != null
+                                && !call.recording.uri.isBlank()) {
+                            String recUri = call.recording.uri;
+                            String rid = recUri.substring(recUri.lastIndexOf('/') + 1);
+                            if (!rid.isBlank()) recId = rid;
+                        }
+
+                        // Credit all VMs in this group that pre-date the callback
+                        for (VoicemailRecord vm : groupVMs) {
+                            if (vm.getDateTime() == null) continue;
+                            if (call.startTime.compareTo(vm.getDateTime()) <= 0) continue;
+                            vm.setCallbackTime(call.startTime);
+                            if (callbackBy != null) vm.setCallbackBy(callbackBy);
+                        }
+
+                        // Recording only on the most-recent VM (avoids same recording
+                        // appearing on every VM from a shared-number group)
+                        if (recId != null
+                                && mostRecentVM.getDateTime() != null
+                                && call.startTime.compareTo(mostRecentVM.getDateTime()) > 0) {
+                            mostRecentVM.setCallbackRecordingId(recId);
+                        }
+                        break; // one callback per group
                     }
-                }
-                if (call.recording != null && call.recording.uri != null
-                        && !call.recording.uri.isBlank()) {
-                    String recUri = call.recording.uri;
-                    String recId  = recUri.substring(recUri.lastIndexOf('/') + 1);
-                    if (!recId.isBlank()) vm.setCallbackRecordingId(recId);
-                }
-                break; // matched, move on to next voicemail
-            }
-        }
+                });
 
         // ── Set same-caller count on each record ──────────────────────────────
         // Groups by number+statedCallerName when a transcript name is available,
@@ -587,7 +663,15 @@ public class VoicemailService {
                         String transcript = new String(content, StandardCharsets.UTF_8).trim();
                         rec.setTranscript(transcript);
                         String statedName = extractStatedCallerName(transcript);
-                        if (statedName != null) rec.setStatedCallerName(statedName);
+                        if (statedName != null) {
+                            rec.setStatedCallerName(statedName);
+                        } else {
+                            // Log first 200 chars so we can tune the name-extraction
+                            // pattern for AI Receptionist or other unusual formats.
+                            System.out.println("[VoicemailService] No statedName extracted for id="
+                                    + rec.getId() + " caller=" + rec.getCallerNumber()
+                                    + " transcript(200)=" + transcript.substring(0, Math.min(200, transcript.length())));
+                        }
                     }
                 } catch (Exception e) {
                     System.err.println("[VoicemailService] Transcript fetch failed for id="
