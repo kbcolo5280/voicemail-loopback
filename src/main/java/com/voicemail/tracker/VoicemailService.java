@@ -546,7 +546,7 @@ public class VoicemailService {
         // claims the earliest callback call.
         vmsByGroup.entrySet().stream()
                 .sorted(Comparator.comparing(e -> e.getValue().stream()
-                        .map(VoicemailRecord::getDateTime).filter(d -> d != null)
+                        .map(vm -> vm.getDateTime() != null ? vm.getDateTime() : "")
                         .min(Comparator.naturalOrder()).orElse("")))
                 .forEach(entry -> {
                     List<VoicemailRecord> groupVMs = entry.getValue();
@@ -555,8 +555,9 @@ public class VoicemailService {
                     if (calls == null || calls.isEmpty()) return;
 
                     // Sort group VMs oldest-first; the last element is the most recent
-                    groupVMs.sort(Comparator.comparing(VoicemailRecord::getDateTime,
-                            Comparator.nullsLast(Comparator.naturalOrder())));
+                    groupVMs.sort(Comparator.comparing(
+                            (VoicemailRecord vm) -> vm.getDateTime() != null ? vm.getDateTime() : "",
+                            Comparator.naturalOrder()));
                     VoicemailRecord mostRecentVM = groupVMs.get(groupVMs.size() - 1);
 
                     for (CallLogRecord call : calls) {
