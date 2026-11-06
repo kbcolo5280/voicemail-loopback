@@ -471,6 +471,20 @@ public class VoicemailService {
 
         RestClient rc = getClient(sessionId);
 
+        // ── Build extensionId → display number map from cached extension list ──
+        // RC call log only returns extensionId in call.from, not the short number.
+        // fetchExtensions() is cached (1-hour TTL) so this adds no extra RC call.
+        Map<String, String> extIdToNumber = new java.util.HashMap<>();
+        try {
+            for (ExtensionRecord er : fetchExtensions(sessionId)) {
+                if (er.getId() != null && er.getExtensionNumber() != null) {
+                    extIdToNumber.put(er.getId(), er.getExtensionNumber());
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("[VoicemailService] Could not load extensions for callbackBy lookup: " + e.getMessage());
+        }
+
         // ── One broad query: all outbound voice calls since earliest voicemail ──
         ReadCompanyCallLogParameters clParams = new ReadCompanyCallLogParameters();
         clParams.direction = new String[]{"Outbound"};
@@ -568,22 +582,21 @@ public class VoicemailService {
                         // Claim this call for this group
                         claimedCalls.add(claimKey);
 
-                        // Build "Called Back By" string — Bug 2: include extension number
+                        // Build "Called Back By" string — include display extension number.
+                        // RC call log returns extensionId (internal long ID), not the short
+                        // display number.  We resolve it via the cached extension list.
                         String callbackBy = null;
                         if (call.from != null) {
-                            String name = call.from.name;
-                            String ext  = call.from.extensionNumber;
-                            // Debug: log all from fields so we can confirm extensionNumber is populated
-                            System.out.println("[VoicemailService] callback from: name=" + name
-                                    + " extensionNumber=" + ext
-                                    + " extensionId=" + call.from.extensionId
-                                    + " phoneNumber=" + call.from.phoneNumber);
+                            String name    = call.from.name;
+                            String extId   = call.from.extensionId != null
+                                    ? call.from.extensionId.toString() : null;
+                            String extNum  = extId != null ? extIdToNumber.get(extId) : null;
                             if (name != null && !name.isBlank()) {
-                                callbackBy = (ext != null && !ext.isBlank())
-                                        ? name + " (" + ext + ")"
+                                callbackBy = (extNum != null && !extNum.isBlank())
+                                        ? name + " (" + extNum + ")"
                                         : name;
-                            } else if (ext != null && !ext.isBlank()) {
-                                callbackBy = "Ext. " + ext;
+                            } else if (extNum != null && !extNum.isBlank()) {
+                                callbackBy = "Ext. " + extNum;
                             } else if (call.from.phoneNumber != null) {
                                 callbackBy = call.from.phoneNumber;
                             }
