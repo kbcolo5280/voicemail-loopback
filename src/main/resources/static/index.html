@@ -888,8 +888,15 @@ async function enrichCallbacksBackground(gen) {
   const badge = document.getElementById('callbackLoadingBadge');
   if (badge) badge.classList.remove('hidden');
   try {
-    const items = unchecked
-      .map(r => ({ id: r.id, callerNumber: r.callerNumber, dateTime: r.dateTime }));
+    // Include ALL records that share a callerNumber with any unchecked record.
+    // If Bob Smith is checked but Tiger Woods (same number) is not, we must
+    // still send Bob to the backend so the FIFO matching sees both VMs and
+    // assigns the callback to the right one instead of defaulting to Tiger.
+    // Also include statedCallerName so the backend can distinguish groups.
+    const uncheckedNumbers = new Set(unchecked.map(r => r.callerNumber));
+    const items = allRecords
+      .filter(r => r.callerNumber && r.dateTime && uncheckedNumbers.has(r.callerNumber))
+      .map(r => ({ id: r.id, callerNumber: r.callerNumber, dateTime: r.dateTime, statedCallerName: r.statedCallerName || '' }));
 
     if (items.length === 0) return;
 
