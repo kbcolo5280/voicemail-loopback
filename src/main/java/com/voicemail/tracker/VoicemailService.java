@@ -190,7 +190,10 @@ public class VoicemailService {
         if (name != null && !name.isBlank()) {
             return num + "|" + name.toLowerCase().trim();
         }
-        return num != null ? num : "";
+        // No transcript / stated name available — treat each VM as its own independent
+        // group so voicemails without a caller name never falsely share callback credit
+        // or swap each other's callback recording.
+        return (num != null ? num : "") + "|id:" + r.getId();
     }
 
     private String normalizeNumber(String phoneNumber) {
