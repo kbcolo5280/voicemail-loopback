@@ -103,6 +103,9 @@ public class SubscriptionScheduler {
             return db.compareTo(da);
         });
 
+        // Enrich with callback data so the email shows Called Back By / Callback Time
+        voicemailService.enrichWithCallbacks(sessionId, records);
+
         String subject     = sub.getName() + " — Voicemail Report (" + sub.getPeriod() + ")";
         String htmlBody    = reportService.generateHtmlEmail(records, sub.getPeriod(), sub.getViewMode());
         String csvContent  = reportService.generateCsv(records);
